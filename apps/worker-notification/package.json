@@ -1,0 +1,12 @@
+{
+  "name": "@asm17/worker-notification",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "echo '테스트가 아직 구성되지 않았습니다: @asm17/worker-notification'",
+    "lint": "echo '린트가 아직 구성되지 않았습니다: @asm17/worker-notification'",
+    "typecheck": "echo '타입체크가 아직 구성되지 않았습니다: @asm17/worker-notification'",
+    "format:check": "echo '포맷 검사가 아직 구성되지 않았습니다: @asm17/worker-notification'"
+  }
+}

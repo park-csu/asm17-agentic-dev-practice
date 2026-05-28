@@ -1,0 +1,12 @@
+{
+  "name": "@asm17/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "echo '테스트가 아직 구성되지 않았습니다: @asm17/web'",
+    "lint": "echo '린트가 아직 구성되지 않았습니다: @asm17/web'",
+    "typecheck": "echo '타입체크가 아직 구성되지 않았습니다: @asm17/web'",
+    "format:check": "echo '포맷 검사가 아직 구성되지 않았습니다: @asm17/web'"
+  }
+}
