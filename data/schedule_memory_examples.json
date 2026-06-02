@@ -1,0 +1,71 @@
+[
+  {
+    "id": "schedule_001",
+    "schedule_title": "소프트웨어 마에스트로 최종 발표",
+    "schedule_detail": "프로젝트 결과를 발표하고 데모를 보여줘야 함",
+    "category": "presentation",
+    "task_pattern": [
+      "발표 핵심 메시지 정리",
+      "발표 자료 목차 작성",
+      "PPT 초안 제작",
+      "데모 시나리오 점검",
+      "최종 리허설"
+    ],
+    "keywords": ["발표", "데모", "PPT"]
+  },
+  {
+    "id": "schedule_002",
+    "schedule_title": "팀 프로젝트 중간 점검 회의",
+    "schedule_detail": "진행 상황을 공유하고 다음 작업을 정해야 함",
+    "category": "meeting",
+    "task_pattern": [
+      "현재 진행 상황 정리",
+      "이슈와 blocker 목록 작성",
+      "회의 안건 작성",
+      "담당자별 다음 작업 정리"
+    ],
+    "keywords": ["회의", "프로젝트", "점검"]
+  },
+  {
+    "id": "schedule_003",
+    "schedule_title": "기말고사 데이터베이스 시험",
+    "schedule_detail": "정규화, SQL, 트랜잭션 범위를 준비해야 함",
+    "category": "exam",
+    "task_pattern": [
+      "시험 범위 확인",
+      "핵심 개념 요약",
+      "SQL 문제 풀이",
+      "오답 정리",
+      "시험 전 최종 복습"
+    ],
+    "keywords": ["시험", "공부", "데이터베이스"]
+  },
+  {
+    "id": "schedule_004",
+    "schedule_title": "해커톤 제출 마감",
+    "schedule_detail": "프로토타입과 발표 자료를 제출해야 함",
+    "category": "deadline",
+    "task_pattern": [
+      "필수 제출 항목 확인",
+      "핵심 기능 완성",
+      "버그 점검",
+      "발표 자료 작성",
+      "제출 파일 업로드"
+    ],
+    "keywords": ["해커톤", "제출", "마감"]
+  },
+  {
+    "id": "schedule_005",
+    "schedule_title": "멘토링 준비",
+    "schedule_detail": "멘토에게 현재 진행 상황과 질문을 공유해야 함",
+    "category": "mentoring",
+    "task_pattern": [
+      "진행 상황 요약",
+      "질문 목록 작성",
+      "결정이 필요한 항목 정리",
+      "회의 자료 공유",
+      "멘토링 후 액션 아이템 정리"
+    ],
+    "keywords": ["멘토링", "질문", "진행상황"]
+  }
+]

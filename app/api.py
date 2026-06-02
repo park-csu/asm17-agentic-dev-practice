@@ -1,0 +1,101 @@
+import json
+
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
+
+from app.schedule_agent.graph import create_graph
+from app.schedule_agent.schemas import ScheduleTaskRequest, ScheduleTaskResponse, StreamEvent
+
+router = APIRouter()
+graph = create_graph()
+
+
+def build_initial_state(request: ScheduleTaskRequest) -> dict:
+    """요청 본문으로부터 일정 에이전트 초기 상태를 생성한다."""
+    title = request.title or ""
+    detail = request.detail
+    detail_with_context = request.detail_with_context or detail
+
+    return {
+        "title": title,
+        "detail": detail,
+        "detail_with_context": detail_with_context,
+        "context_answer": request.context_answer,
+        "start_time": request.start_time,
+        "end_time": request.end_time,
+        "existing_schedules": request.existing_schedules,
+        "classification_retry": request.classification_retry,
+        "plan_retry": request.plan_retry,
+        "max_retry": request.max_retry,
+        "needs_question": False,
+        "question": "",
+        "is_valid": False,
+        "invalid_reason": "",
+        "normalized_schedule": {},
+        "tasks": [],
+        "plan_reason": "",
+        "status": "fallback",
+        "fallback_reason": "",
+        "answer": "",
+    }
+
+
+def build_response(result: dict) -> ScheduleTaskResponse:
+    """그래프 최종 상태를 API 응답 모델로 변환한다."""
+    return ScheduleTaskResponse(
+        status=result.get("status", "fallback"),
+        title=result.get("title", ""),
+        detail_with_context=result.get("detail_with_context", ""),
+        start_time=result.get("start_time", ""),
+        end_time=result.get("end_time", ""),
+        normalized_schedule=result.get("normalized_schedule", {}),
+        tasks=result.get("tasks", []),
+        question=result.get("question", ""),
+        classification_retry=result.get("classification_retry", 0),
+        plan_retry=result.get("plan_retry", 0),
+        fallback_reason=result.get("fallback_reason", ""),
+        answer=result.get("answer", ""),
+    )
+
+
+@router.post("/schedules/tasks/sync", response_model=ScheduleTaskResponse)
+async def create_schedule_tasks_sync(request: ScheduleTaskRequest):
+    """일정 에이전트를 동기 방식으로 실행하고 최종 상태를 반환한다."""
+    result = await graph.ainvoke(build_initial_state(request))
+    return build_response(result)
+
+
+@router.post("/schedules/tasks/stream")
+async def create_schedule_tasks_stream(request: ScheduleTaskRequest):
+    """SSE 스트리밍으로 각 노드의 처리 과정을 실시간 전송한다."""
+
+    async def gen():
+        async for event in graph.astream_events(build_initial_state(request), version="v2"):
+            kind = event.get("event", "")
+            node_names = {
+                "classification",
+                "ask_context",
+                "pre_validate",
+                "plan",
+                "post_validate",
+                "output",
+                "fallback",
+            }
+            if kind == "on_chain_end" and event.get("name") in node_names:
+                node_name = event["name"]
+                node_output = event.get("data", {}).get("output", {})
+                sse = StreamEvent(
+                    event="node",
+                    node=node_name,
+                    data=json.dumps(node_output, ensure_ascii=False, default=str),
+                )
+                yield f"data: {sse.model_dump_json()}\n\n"
+
+        result = await graph.ainvoke(build_initial_state(request))
+        done = StreamEvent(
+            event="done",
+            data=build_response(result).model_dump_json(),
+        )
+        yield f"data: {done.model_dump_json()}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
