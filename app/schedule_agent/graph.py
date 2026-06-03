@@ -20,7 +20,11 @@ def route_after_classification(state: AgentState) -> str:
 
 
 def route_after_pre_validate(state: AgentState) -> str:
-    """일정 유효성 검증 결과에 따라 계획 또는 실패로 이동한다."""
+    """일정 유효성 검증 결과에 따라 질문, 계획 또는 실패로 이동한다."""
+    retry = state.get("pre_validation_retry", 0)
+    max_retry = state.get("max_retry", 2)
+    if state.get("needs_question", False) and retry < max_retry:
+        return "ask_context"
     return "plan" if state.get("is_valid", False) else "fallback"
 
 
@@ -48,7 +52,7 @@ def create_graph():
     builder.add_edge(START, "classification")
     builder.add_conditional_edges("classification", route_after_classification, {"ask_context": "ask_context", "pre_validate": "pre_validate"})
     builder.add_edge("ask_context", END)
-    builder.add_conditional_edges("pre_validate", route_after_pre_validate, {"plan": "plan", "fallback": "fallback"})
+    builder.add_conditional_edges("pre_validate", route_after_pre_validate, {"ask_context": "ask_context", "plan": "plan", "fallback": "fallback"})
     builder.add_edge("plan", "post_validate")
     builder.add_conditional_edges("post_validate", route_after_post_validate, {"output": "output", "plan": "plan", "fallback": "fallback"})
     builder.add_edge("output", END)

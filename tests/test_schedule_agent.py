@@ -29,8 +29,24 @@ class ScheduleAgentGraphTest(unittest.TestCase):
         self.assertEqual(route_after_classification(state), "pre_validate")
 
     def test_route_after_pre_validate(self):
+        self.assertEqual(
+            route_after_pre_validate(
+                {"needs_question": True, "pre_validation_retry": 0, "max_retry": 2}
+            ),
+            "ask_context",
+        )
         self.assertEqual(route_after_pre_validate({"is_valid": True}), "plan")
         self.assertEqual(route_after_pre_validate({"is_valid": False}), "fallback")
+
+    def test_route_after_pre_validate_stops_question_at_max_retry(self):
+        state = {
+            "needs_question": True,
+            "is_valid": False,
+            "pre_validation_retry": 2,
+            "max_retry": 2,
+        }
+
+        self.assertEqual(route_after_pre_validate(state), "fallback")
 
     def test_route_after_post_validate_retries_until_max_retry(self):
         retry_state = {"is_valid": False, "plan_retry": 1, "max_retry": 2}

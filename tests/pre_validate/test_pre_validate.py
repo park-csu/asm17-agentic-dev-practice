@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from app.api import build_initial_state, build_response
+from app.schedule_agent.nodes.ask_context import ask_context
 from app.schedule_agent.nodes.pre_validate import pre_validate_schedule
 from app.schedule_agent.schemas import PreValidationResult, ScheduleTaskRequest
 
@@ -41,6 +42,23 @@ class PreValidateScheduleTest(unittest.TestCase):
 
         self.assertEqual(state["location"], "부산광역시")
         self.assertEqual(response.location, "부산광역시")
+
+    def test_api_state_and_response_preserve_pre_validation_question_state(self):
+        request = ScheduleTaskRequest(
+            pre_validation_retry=1,
+            question_source="pre_validate",
+            pre_validation_question="이 작업은 현장 도착이 필수인가요?",
+        )
+
+        state = build_initial_state(request)
+        response = build_response({**state, "status": "needs_question"})
+
+        self.assertEqual(state["pre_validation_retry"], 1)
+        self.assertEqual(state["question_source"], "pre_validate")
+        self.assertEqual(
+            response.pre_validation_question,
+            "이 작업은 현장 도착이 필수인가요?",
+        )
 
     def test_rejects_when_title_and_detail_are_empty(self):
         result = pre_validate_schedule(
@@ -97,7 +115,7 @@ class PreValidateScheduleTest(unittest.TestCase):
         ):
             result = pre_validate_schedule(state)
 
-        self.assertEqual(result, expected.model_dump())
+        self.assertEqual(result, {**expected.model_dump(), "question_source": ""})
 
     def test_rejects_when_start_time_is_not_before_end_time(self):
         for start_time, end_time in [
@@ -226,6 +244,210 @@ class PreValidateScheduleTest(unittest.TestCase):
         self.assertIn("'location': '서울특별시'", human_message.content)
         self.assertIn("'gap_minutes': 60", human_message.content)
         self.assertFalse(result["is_valid"])
+
+    def test_returns_question_when_location_requirement_is_ambiguous(self):
+        expected = PreValidationResult(
+            is_valid=False,
+            needs_question=True,
+            question="이 문서 작업은 한국에 도착해야만 가능한가요?",
+            normalized_schedule={},
+            invalid_reason="",
+        )
+        state = {
+            "title": "한국 보고서 작성",
+            "detail_with_context": "한국 사업 보고서를 작성한다.",
+            "location": "대한민국 서울",
+            "start_time": "2026-06-15T13:00:00+09:00",
+            "end_time": "2026-06-15T14:00:00+09:00",
+            "existing_schedules": [
+                {
+                    "title": "영국 미팅",
+                    "location": "영국 런던",
+                    "start_time": "2026-06-15T08:00:00+09:00",
+                    "end_time": "2026-06-15T10:00:00+09:00",
+                }
+            ],
+            "pre_validation_retry": 0,
+            "max_retry": 2,
+        }
+
+        with patch(
+            "app.schedule_agent.nodes.pre_validate.get_llm",
+            return_value=FakeLlm(result=expected),
+        ):
+            result = pre_validate_schedule(state)
+
+        self.assertTrue(result["needs_question"])
+        self.assertEqual(result["question_source"], "pre_validate")
+        self.assertEqual(
+            result["pre_validation_question"],
+            "이 문서 작업은 한국에 도착해야만 가능한가요?",
+        )
+        self.assertEqual(result["invalid_reason"], "")
+
+    def test_forces_location_question_when_llm_returns_valid(self):
+        expected = PreValidationResult(
+            is_valid=True,
+            needs_question=False,
+            question="",
+            normalized_schedule={"title": "한국 보고서 작성"},
+            invalid_reason="",
+        )
+        state = {
+            "title": "한국 보고서 작성",
+            "detail_with_context": "한국 사업 보고서를 작성한다.",
+            "location": "대한민국 서울",
+            "start_time": "2026-06-15T13:00:00+09:00",
+            "end_time": "2026-06-15T14:00:00+09:00",
+            "existing_schedules": [
+                {
+                    "title": "영국 고객 미팅",
+                    "location": "영국 런던",
+                    "start_time": "2026-06-15T08:00:00+09:00",
+                    "end_time": "2026-06-15T10:00:00+09:00",
+                }
+            ],
+            "pre_validation_retry": 0,
+            "max_retry": 2,
+        }
+
+        with patch(
+            "app.schedule_agent.nodes.pre_validate.get_llm",
+            return_value=FakeLlm(result=expected),
+        ):
+            result = pre_validate_schedule(state)
+
+        self.assertTrue(result["needs_question"])
+        self.assertEqual(result["question_source"], "pre_validate")
+        self.assertEqual(result["invalid_reason"], "")
+
+    def test_replaces_placeholder_location_question(self):
+        expected = PreValidationResult(
+            is_valid=True,
+            needs_question=False,
+            question="null string (empty string as per default value in schema)",
+            normalized_schedule={},
+            invalid_reason="",
+        )
+        state = {
+            "title": "한국 보고서 작성",
+            "detail_with_context": "한국 사업 보고서를 작성한다.",
+            "location": "대한민국 서울",
+            "start_time": "2026-06-15T13:00:00+09:00",
+            "end_time": "2026-06-15T14:00:00+09:00",
+            "existing_schedules": [
+                {
+                    "title": "영국 고객 미팅",
+                    "location": "영국 런던",
+                    "start_time": "2026-06-15T08:00:00+09:00",
+                    "end_time": "2026-06-15T10:00:00+09:00",
+                }
+            ],
+            "pre_validation_retry": 0,
+            "max_retry": 2,
+        }
+
+        with patch(
+            "app.schedule_agent.nodes.pre_validate.get_llm",
+            return_value=FakeLlm(result=expected),
+        ):
+            result = pre_validate_schedule(state)
+
+        self.assertTrue(result["needs_question"])
+        self.assertIn("도착", result["question"])
+        self.assertNotIn("null string", result["question"])
+
+    def test_does_not_allow_non_location_pre_validation_question(self):
+        expected = PreValidationResult(
+            is_valid=False,
+            needs_question=True,
+            question="구체적인 시간을 알려 주세요.",
+            normalized_schedule={},
+            invalid_reason="",
+        )
+        state = {
+            "title": "자료 조사",
+            "detail_with_context": "시장 동향 자료를 조사한다.",
+            "start_time": "나중에",
+            "end_time": "적당히 끝날 때",
+            "existing_schedules": [],
+        }
+
+        with patch(
+            "app.schedule_agent.nodes.pre_validate.get_llm",
+            return_value=FakeLlm(result=expected),
+        ):
+            result = pre_validate_schedule(state)
+
+        self.assertFalse(result["needs_question"])
+        self.assertEqual(result["question"], "")
+        self.assertIn("시간", result["invalid_reason"])
+
+    def test_rejects_question_when_pre_validation_retry_is_exhausted(self):
+        expected = PreValidationResult(
+            is_valid=False,
+            needs_question=True,
+            question="이 작업은 현장 도착이 필수인가요?",
+            normalized_schedule={},
+            invalid_reason="",
+        )
+        state = {
+            "title": "한국 보고서 작성",
+            "detail_with_context": "한국 사업 보고서를 작성한다.",
+            "location": "대한민국 서울",
+            "start_time": "2026-06-15T13:00:00+09:00",
+            "end_time": "2026-06-15T14:00:00+09:00",
+            "existing_schedules": [
+                {
+                    "title": "영국 고객 미팅",
+                    "location": "영국 런던",
+                    "start_time": "2026-06-15T08:00:00+09:00",
+                    "end_time": "2026-06-15T10:00:00+09:00",
+                }
+            ],
+            "pre_validation_retry": 2,
+            "max_retry": 2,
+        }
+
+        with patch(
+            "app.schedule_agent.nodes.pre_validate.get_llm",
+            return_value=FakeLlm(result=expected),
+        ):
+            result = pre_validate_schedule(state)
+
+        self.assertFalse(result["needs_question"])
+        self.assertFalse(result["is_valid"])
+        self.assertIn("위치 제약", result["invalid_reason"])
+
+    def test_ask_context_increments_only_pre_validation_retry(self):
+        result = ask_context(
+            {
+                "question_source": "pre_validate",
+                "question": "이 작업은 현장 도착이 필수인가요?",
+                "classification_retry": 1,
+                "pre_validation_retry": 0,
+            }
+        )
+
+        self.assertNotIn("classification_retry", result)
+        self.assertEqual(result["pre_validation_retry"], 1)
+        self.assertEqual(
+            result["pre_validation_question"],
+            "이 작업은 현장 도착이 필수인가요?",
+        )
+
+    def test_ask_context_increments_only_classification_retry(self):
+        result = ask_context(
+            {
+                "question_source": "classification",
+                "question": "완료 기준은 무엇인가요?",
+                "classification_retry": 0,
+                "pre_validation_retry": 1,
+            }
+        )
+
+        self.assertEqual(result["classification_retry"], 1)
+        self.assertNotIn("pre_validation_retry", result)
 
     def test_rejects_when_llm_fails_in_operational_mode(self):
         state = {

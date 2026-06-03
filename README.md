@@ -113,11 +113,13 @@ curl -X POST http://localhost:8001/api/v1/schedules/tasks/sync \
   }'
 ```
 
-`classification_retry`, `plan_retry`, `detail_with_context`, `context_answer`는 서버 상태 저장이 없는 현재 프로토타입에서 LangGraph 상태를 이어가기 위한 필드입니다. 정식 API/DB 연동 단계에서는 run/session 저장소가 이 상태를 관리하고, 클라이언트는 사용자 입력과 보충 답변 중심으로 요청하도록 재설계할 예정입니다.
+`classification_retry`, `pre_validation_retry`, `plan_retry`, `detail_with_context`, `context_answer`는 서버 상태 저장이 없는 현재 프로토타입에서 LangGraph 상태를 이어가기 위한 필드입니다. 정식 API/DB 연동 단계에서는 run/session 저장소가 이 상태를 관리하고, 클라이언트는 사용자 입력과 보충 답변 중심으로 요청하도록 재설계할 예정입니다.
 
 `existing_schedules`는 캘린더/DB 연동 전 충돌 검증을 실험하기 위한 임시 입력 필드입니다. 정식 API에서는 서버가 Google Calendar 또는 PostgreSQL에서 기존 일정을 조회하는 방식으로 변경할 예정입니다.
 
 `location`과 `existing_schedules` 안의 `location`은 일정 사이 이동 가능성을 검증할 때 사용합니다. 위치가 없거나 이동 가능 여부가 불명확한 경우에는 위치만으로 일정을 거절하지 않습니다.
+
+위치가 지정된 작업이 현장 도착을 요구하는지 불명확하면 `pre_validate`가 추가 질문을 반환합니다. 다음 요청에는 응답의 `pre_validation_question`, `pre_validation_retry`와 사용자 답변인 `context_answer`를 함께 전달합니다. 분류 질문과 사전 검증 질문의 재시도 횟수는 서로 독립적입니다.
 
 응답 예시:
 

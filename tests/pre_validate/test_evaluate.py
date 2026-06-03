@@ -23,6 +23,7 @@ class PreValidateEvaluateTest(unittest.TestCase):
                 "checks": {
                     "model_call_succeeded": True,
                     "is_valid_matches": True,
+                    "needs_question_matches": True,
                     "normalized_required_fields": True,
                     "normalized_expected_values": True,
                 },
@@ -35,6 +36,7 @@ class PreValidateEvaluateTest(unittest.TestCase):
                 "checks": {
                     "model_call_succeeded": False,
                     "is_valid_matches": False,
+                    "needs_question_matches": True,
                     "invalid_reason_exists": False,
                     "invalid_reason_keyword": False,
                 },

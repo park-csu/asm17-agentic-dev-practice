@@ -18,7 +18,12 @@ def classify_schedule(state: AgentState) -> dict:
     end_time = state.get("end_time", "")
 
     if state.get("classification_retry", 0) >= state.get("max_retry", 2):
-        return {"needs_question": False, "question": "", "detail_with_context": detail_with_context}
+        return {
+            "needs_question": False,
+            "question": "",
+            "question_source": "",
+            "detail_with_context": detail_with_context,
+        }
 
     try:
         llm = get_llm(temperature=0.0).with_structured_output(ClassificationResult)
@@ -36,12 +41,15 @@ def classify_schedule(state: AgentState) -> dict:
                 ),
             ]
         )
-        return result.model_dump()
+        result_dict = result.model_dump()
+        result_dict["question_source"] = "classification" if result_dict["needs_question"] else ""
+        return result_dict
     except Exception as e:
         logger.warning("Schedule classification failed: %s", e)
         needs_question = not start_time or not end_time or len(f"{title} {detail_with_context}".strip()) < 8
         return {
             "needs_question": needs_question,
             "question": "이 일정은 언제부터 언제까지 진행하고, 어떤 결과물이 나오면 될까요?" if needs_question else "",
+            "question_source": "classification" if needs_question else "",
             "detail_with_context": detail_with_context,
         }

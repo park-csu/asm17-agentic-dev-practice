@@ -48,9 +48,18 @@ def evaluate_case(case: dict) -> dict:
     checks = {
         "model_call_succeeded": not error,
         "is_valid_matches": result.get("is_valid") == expected["is_valid"],
+        "needs_question_matches": result.get("needs_question", False)
+        == expected.get("needs_question", False),
     }
 
-    if expected["is_valid"]:
+    if expected.get("needs_question", False):
+        question = result.get("question", "")
+        question_keywords = expected.get("question_keywords_any", [])
+        checks["question_exists"] = bool(question.strip())
+        checks["question_keyword"] = not question_keywords or any(
+            keyword in question for keyword in question_keywords
+        )
+    elif expected["is_valid"]:
         normalized = result.get("normalized_schedule", {})
         required_fields = expected.get("normalized_required_fields", [])
         expected_values = expected.get("normalized_expected", {})
@@ -86,7 +95,17 @@ def build_summary(case_results: list[dict]) -> dict:
     """전체 평가 결과의 요약 점수를 계산한다."""
     total = len(case_results)
     valid_results = [result for result in case_results if result["expected"]["is_valid"]]
-    invalid_results = [result for result in case_results if not result["expected"]["is_valid"]]
+    question_results = [
+        result
+        for result in case_results
+        if result["expected"].get("needs_question", False)
+    ]
+    invalid_results = [
+        result
+        for result in case_results
+        if not result["expected"]["is_valid"]
+        and not result["expected"].get("needs_question", False)
+    ]
 
     def ratio(passed: int, denominator: int) -> float:
         return round(passed / denominator, 4) if denominator else 0.0
@@ -105,6 +124,11 @@ def build_summary(case_results: list[dict]) -> dict:
         and result["checks"].get("invalid_reason_keyword", False)
         for result in invalid_results
     )
+    question_passes = sum(
+        result["checks"].get("question_exists", False)
+        and result["checks"].get("question_keyword", False)
+        for result in question_results
+    )
     model_errors = sum(not result["checks"]["model_call_succeeded"] for result in case_results)
     passed_cases = sum(result["passed"] for result in case_results)
 
@@ -116,6 +140,7 @@ def build_summary(case_results: list[dict]) -> dict:
         "validity_accuracy": ratio(validity_matches, total),
         "normalized_schedule_pass_rate": ratio(normalized_passes, len(valid_results)),
         "invalid_reason_pass_rate": ratio(invalid_reason_passes, len(invalid_results)),
+        "question_pass_rate": ratio(question_passes, len(question_results)),
         "model_errors": model_errors,
         "average_elapsed_seconds": round(
             sum(result["elapsed_seconds"] for result in case_results) / total,
@@ -185,6 +210,7 @@ def print_summary(summary: dict, stability: dict, result_path: Path) -> None:
     print(f"- 마지막 실행 유효성 판단 정확도: {summary['validity_accuracy']:.1%}")
     print(f"- 마지막 실행 정규화 일정 통과율: {summary['normalized_schedule_pass_rate']:.1%}")
     print(f"- 마지막 실행 실패 사유 통과율: {summary['invalid_reason_pass_rate']:.1%}")
+    print(f"- 마지막 실행 질문 통과율: {summary['question_pass_rate']:.1%}")
     print(f"- 전체 모델 오류: {stability['total_model_errors']}")
     print(f"- 마지막 실행 평균 응답 시간: {summary['average_elapsed_seconds']:.3f}초")
     print(
