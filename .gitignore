@@ -31,6 +31,9 @@ chroma_data/
 *.sqlite3
 *.db
 
+# eval 실행 산출물
+evals/**/results.jsonl
+
 # 로그
 *.log
 
