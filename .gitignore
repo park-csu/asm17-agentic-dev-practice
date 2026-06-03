@@ -1,0 +1,46 @@
+# 환경 변수와 비밀값
+.env
+.env.*
+!.env.example
+
+# Python 캐시와 가상환경
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+
+# 테스트/품질 도구 캐시
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 빌드 산출물
+build/
+dist/
+*.egg-info/
+frontend/dist/
+
+# 로컬 데이터와 런타임 산출물
+chroma_data/
+*.sqlite
+*.sqlite3
+*.db
+
+# 로그
+*.log
+
+# 프론트엔드 의존성
+node_modules/
+frontend/node_modules/
+*.tsbuildinfo
+frontend/*.tsbuildinfo
+
+# OS/에디터 파일
+.DS_Store
+.idea/
+.vscode/
