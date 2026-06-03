@@ -38,6 +38,7 @@ class AgentState(TypedDict, total=False):
     title: str
     detail: str
     detail_with_context: str
+    location: str
     context_answer: str
     start_time: str
     end_time: str
@@ -65,6 +66,7 @@ class ScheduleTaskRequest(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     detail: str = Field(default="", max_length=4000)
     detail_with_context: str = Field(default="", max_length=8000)
+    location: str = Field(default="", max_length=500)
     context_answer: str = Field(default="", max_length=4000)
     start_time: str = Field(default="", max_length=200)
     end_time: str = Field(default="", max_length=200)
@@ -78,6 +80,7 @@ class ScheduleTaskResponse(BaseModel):
     status: Literal["ok", "fallback", "needs_question"]
     title: str = ""
     detail_with_context: str = ""
+    location: str = ""
     start_time: str = ""
     end_time: str = ""
     normalized_schedule: dict = Field(default_factory=dict)

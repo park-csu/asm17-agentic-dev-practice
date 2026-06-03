@@ -27,6 +27,7 @@ frontend/dist/
 
 # 로컬 데이터와 런타임 산출물
 chroma_data/
+evals/*/results/
 *.sqlite
 *.sqlite3
 *.db

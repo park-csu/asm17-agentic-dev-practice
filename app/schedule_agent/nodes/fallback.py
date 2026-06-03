@@ -9,6 +9,7 @@ def build_fallback(state: AgentState) -> dict:
         "status": "fallback",
         "title": state.get("title", ""),
         "detail_with_context": state.get("detail_with_context") or state.get("detail", ""),
+        "location": state.get("location", ""),
         "start_time": state.get("start_time", ""),
         "end_time": state.get("end_time", ""),
         "tasks": [],

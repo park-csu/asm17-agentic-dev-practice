@@ -11,6 +11,7 @@ def build_output(state: AgentState) -> dict:
         "status": "ok",
         "title": title,
         "detail_with_context": detail_with_context,
+        "location": state.get("location", ""),
         "start_time": state.get("start_time", ""),
         "end_time": state.get("end_time", ""),
         "tasks": tasks,
