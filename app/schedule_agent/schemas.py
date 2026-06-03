@@ -19,6 +19,14 @@ class ClassificationResult(BaseModel):
 
 class PreValidationResult(BaseModel):
     is_valid: bool = Field(description="일정 유효성 여부")
+    needs_question: bool = Field(
+        default=False,
+        description="위치 제약 등 유효성 판단 정보가 부족해 사용자 확인이 필요한지 여부",
+    )
+    question: str = Field(
+        default="",
+        description="유효성 판단에 필요한 정보를 확인하는 단일 추가 질문",
+    )
     normalized_schedule: dict = Field(default_factory=dict, description="정규화된 일정 정보")
     invalid_reason: str = Field(default="", description="유효하지 않은 이유")
 
@@ -38,17 +46,21 @@ class AgentState(TypedDict, total=False):
     title: str
     detail: str
     detail_with_context: str
+    location: str
     context_answer: str
     start_time: str
     end_time: str
     existing_schedules: list[dict]
 
     classification_retry: int
+    pre_validation_retry: int
     plan_retry: int
     max_retry: int
 
     needs_question: bool
     question: str
+    question_source: Literal["", "classification", "pre_validate"]
+    pre_validation_question: str
     is_valid: bool
     invalid_reason: str
 
@@ -65,26 +77,34 @@ class ScheduleTaskRequest(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     detail: str = Field(default="", max_length=4000)
     detail_with_context: str = Field(default="", max_length=8000)
+    location: str = Field(default="", max_length=500)
     context_answer: str = Field(default="", max_length=4000)
     start_time: str = Field(default="", max_length=200)
     end_time: str = Field(default="", max_length=200)
     existing_schedules: list[dict] = Field(default_factory=list)
     classification_retry: int = Field(default=0, ge=0)
+    pre_validation_retry: int = Field(default=0, ge=0)
     plan_retry: int = Field(default=0, ge=0)
     max_retry: int = Field(default=2, ge=0, le=5)
+    question_source: Literal["", "classification", "pre_validate"] = ""
+    pre_validation_question: str = Field(default="", max_length=4000)
 
 
 class ScheduleTaskResponse(BaseModel):
     status: Literal["ok", "fallback", "needs_question"]
     title: str = ""
     detail_with_context: str = ""
+    location: str = ""
     start_time: str = ""
     end_time: str = ""
     normalized_schedule: dict = Field(default_factory=dict)
     tasks: list[dict] = Field(default_factory=list)
     question: str = ""
     classification_retry: int = 0
+    pre_validation_retry: int = 0
     plan_retry: int = 0
+    question_source: Literal["", "classification", "pre_validate"] = ""
+    pre_validation_question: str = ""
     fallback_reason: str = ""
     answer: str = ""
 
