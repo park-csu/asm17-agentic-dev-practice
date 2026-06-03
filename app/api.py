@@ -8,6 +8,15 @@ from app.schedule_agent.schemas import ScheduleTaskRequest, ScheduleTaskResponse
 
 router = APIRouter()
 graph = create_graph()
+STREAM_NODE_NAMES = {
+    "classification",
+    "ask_context",
+    "pre_validate",
+    "plan",
+    "post_validate",
+    "output",
+    "fallback",
+}
 
 
 def build_initial_state(request: ScheduleTaskRequest) -> dict:
@@ -70,31 +79,27 @@ async def create_schedule_tasks_stream(request: ScheduleTaskRequest):
     """SSE 스트리밍으로 각 노드의 처리 과정을 실시간 전송한다."""
 
     async def gen():
-        async for event in graph.astream_events(build_initial_state(request), version="v2"):
-            kind = event.get("event", "")
-            node_names = {
-                "classification",
-                "ask_context",
-                "pre_validate",
-                "plan",
-                "post_validate",
-                "output",
-                "fallback",
-            }
-            if kind == "on_chain_end" and event.get("name") in node_names:
-                node_name = event["name"]
-                node_output = event.get("data", {}).get("output", {})
-                sse = StreamEvent(
-                    event="node",
-                    node=node_name,
-                    data=json.dumps(node_output, ensure_ascii=False, default=str),
-                )
-                yield f"data: {sse.model_dump_json()}\n\n"
+        final_state: dict = {}
+        async for mode, chunk in graph.astream(
+            build_initial_state(request),
+            stream_mode=["updates", "values"],
+        ):
+            if mode == "updates":
+                for node_name, node_output in chunk.items():
+                    if node_name not in STREAM_NODE_NAMES:
+                        continue
+                    sse = StreamEvent(
+                        event="node",
+                        node=node_name,
+                        data=json.dumps(node_output, ensure_ascii=False, default=str),
+                    )
+                    yield f"data: {sse.model_dump_json()}\n\n"
+            elif mode == "values":
+                final_state = chunk
 
-        result = await graph.ainvoke(build_initial_state(request))
         done = StreamEvent(
             event="done",
-            data=build_response(result).model_dump_json(),
+            data=build_response(final_state).model_dump_json(),
         )
         yield f"data: {done.model_dump_json()}\n\n"
 
