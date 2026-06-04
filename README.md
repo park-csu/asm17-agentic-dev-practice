@@ -105,6 +105,7 @@ curl -X POST http://localhost:8001/api/v1/schedules/tasks/sync \
   -d '{
     "title": "기말 발표 준비",
     "detail": "자료 조사하고 발표자료를 만들어야 함",
+    "location": "서울특별시",
     "start_time": "2026-06-05 13:00",
     "end_time": "2026-06-05 15:00",
     "existing_schedules": [],
@@ -112,9 +113,13 @@ curl -X POST http://localhost:8001/api/v1/schedules/tasks/sync \
   }'
 ```
 
-`classification_retry`, `plan_retry`, `detail_with_context`, `context_answer`는 서버 상태 저장이 없는 현재 프로토타입에서 LangGraph 상태를 이어가기 위한 필드입니다. 정식 API/DB 연동 단계에서는 run/session 저장소가 이 상태를 관리하고, 클라이언트는 사용자 입력과 보충 답변 중심으로 요청하도록 재설계할 예정입니다.
+`classification_retry`, `pre_validation_retry`, `plan_retry`, `detail_with_context`, `context_answer`는 서버 상태 저장이 없는 현재 프로토타입에서 LangGraph 상태를 이어가기 위한 필드입니다. 정식 API/DB 연동 단계에서는 run/session 저장소가 이 상태를 관리하고, 클라이언트는 사용자 입력과 보충 답변 중심으로 요청하도록 재설계할 예정입니다.
 
 `existing_schedules`는 캘린더/DB 연동 전 충돌 검증을 실험하기 위한 임시 입력 필드입니다. 정식 API에서는 서버가 Google Calendar 또는 PostgreSQL에서 기존 일정을 조회하는 방식으로 변경할 예정입니다.
+
+`location`과 `existing_schedules` 안의 `location`은 일정 사이 이동 가능성을 검증할 때 사용합니다. 위치가 없거나 이동 가능 여부가 불명확한 경우에는 위치만으로 일정을 거절하지 않습니다.
+
+위치가 지정된 작업이 현장 도착을 요구하는지 불명확하면 `pre_validate`가 추가 질문을 반환합니다. 다음 요청에는 응답의 `pre_validation_question`, `pre_validation_retry`와 사용자 답변인 `context_answer`를 함께 전달합니다. 분류 질문과 사전 검증 질문의 재시도 횟수는 서로 독립적입니다.
 
 응답 예시:
 
@@ -122,6 +127,7 @@ curl -X POST http://localhost:8001/api/v1/schedules/tasks/sync \
 {
   "status": "ok",
   "title": "기말 발표 준비",
+  "location": "서울특별시",
   "start_time": "2026-06-05 13:00",
   "end_time": "2026-06-05 15:00",
   "tasks": [
@@ -198,14 +204,32 @@ npm run build
 테스트:
 
 ```bash
-uv run python -m unittest tests.test_schedule_agent
+uv run python -m unittest discover -s tests -v
 ```
+
+`pre_validate` 노드만 빠르게 검증하려면 전용 단위 테스트를 실행합니다.
+
+```bash
+uv run python -m unittest discover -s tests/pre_validate -v
+```
+
+실제 LLM이 일정 유효성을 원하는 기준으로 판단하는지 평가하려면 `UPSTAGE_API_KEY`를 설정한 뒤 다음 명령을 실행합니다.
+
+```bash
+uv run python evals/pre_validate/evaluate.py
+```
+
+평가는 기본 5회 반복하며 모든 케이스가 5회 모두 통과하는지 확인합니다. 반복 횟수를 줄여 빠르게 확인하려면 `--runs 1`을 사용합니다.
+
+평가 케이스와 평가 코드는 팀이 공유할 수 있도록 커밋하며, 실행 결과는 `evals/pre_validate/results/`에 생성되고 커밋하지 않습니다.
 
 ## Documentation
 
 - [CONTEXT-MAP.md](CONTEXT-MAP.md)
 - [app/schedule_agent/CONTEXT.md](app/schedule_agent/CONTEXT.md)
 - [app/schedule_agent/ADR.md](app/schedule_agent/ADR.md)
+- [evals/pre_validate/CONTEXT.md](evals/pre_validate/CONTEXT.md)
+- [evals/pre_validate/ADR.md](evals/pre_validate/ADR.md)
 - [app/schedule_memory/CONTEXT.md](app/schedule_memory/CONTEXT.md)
 - [app/schedule_memory/ADR.md](app/schedule_memory/ADR.md)
 
@@ -263,7 +287,7 @@ npm run dev
 
 ```bash
 PYTHONPYCACHEPREFIX=/private/tmp/project_code_pycache python3 -m compileall app tests
-uv run python -m unittest tests.test_schedule_agent
+uv run python -m unittest discover -s tests -v
 cd frontend
 npm run build
 ```
