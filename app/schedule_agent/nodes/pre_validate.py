@@ -133,6 +133,7 @@ def pre_validate_schedule(state: AgentState, *, strict: bool = False) -> dict:
     location = state.get("location", "")
     context_answer = state.get("context_answer", "")
     pre_validation_question = state.get("pre_validation_question", "")
+    validation_context_answer = context_answer if pre_validation_question.strip() else ""
     start_time = state.get("start_time", "")
     end_time = state.get("end_time", "")
     existing_schedules = state.get("existing_schedules", [])
@@ -178,7 +179,7 @@ def pre_validate_schedule(state: AgentState, *, strict: bool = False) -> dict:
     location_question_needed = needs_location_requirement_question(
         title,
         detail_with_context,
-        context_answer,
+        validation_context_answer,
         travel_context,
     )
 
@@ -193,7 +194,7 @@ def pre_validate_schedule(state: AgentState, *, strict: bool = False) -> dict:
                         f"detail_with_context: {detail_with_context}\n"
                         f"location: {location}\n"
                         f"pre_validation_question: {pre_validation_question}\n"
-                        f"context_answer: {context_answer}\n"
+                        f"context_answer: {validation_context_answer}\n"
                         f"start_time: {start_time}\n"
                         f"end_time: {end_time}\n"
                         f"existing_schedules: {existing_schedules}\n"

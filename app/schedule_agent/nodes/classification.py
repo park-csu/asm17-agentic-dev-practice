@@ -19,6 +19,7 @@ def classify_schedule(state: AgentState) -> dict:
 
     if state.get("classification_retry", 0) >= state.get("max_retry", 2):
         return {
+            "is_decomposable": state.get("is_decomposable", True),
             "needs_question": False,
             "question": "",
             "question_source": "",
@@ -42,12 +43,16 @@ def classify_schedule(state: AgentState) -> dict:
             ]
         )
         result_dict = result.model_dump()
+        if not result_dict["is_decomposable"]:
+            result_dict["needs_question"] = False
+            result_dict["question"] = ""
         result_dict["question_source"] = "classification" if result_dict["needs_question"] else ""
         return result_dict
     except Exception as e:
         logger.warning("Schedule classification failed: %s", e)
         needs_question = not start_time or not end_time or len(f"{title} {detail_with_context}".strip()) < 8
         return {
+            "is_decomposable": True,
             "needs_question": needs_question,
             "question": "이 일정은 언제부터 언제까지 진행하고, 어떤 결과물이 나오면 될까요?" if needs_question else "",
             "question_source": "classification" if needs_question else "",

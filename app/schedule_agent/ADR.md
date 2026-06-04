@@ -10,7 +10,7 @@ Accepted
 - LangGraph를 사용해 각 단계를 별도 노드로 분리한다.
 - 추가 질문은 v1에서 interrupt/checkpointer 대신 `status="needs_question"` 응답으로 처리한다.
 - 일정 시간 입력은 단일 `time` 또는 마감일이 아니라 `start_time`/`end_time` 범위로 받는다.
-- 서버 상태 저장이 없는 v1에서는 `classification_retry`, `plan_retry`, `detail_with_context`, `context_answer`를 요청/응답으로 전달해 LangGraph 상태를 이어간다.
+- 서버 상태 저장이 없는 v1에서는 `classification_retry`, `pre_validation_retry`, `plan_retry`, `detail_with_context`, `question`, `question_source`, `pre_validation_question`, `context_answer`를 요청/응답으로 전달해 LangGraph 상태를 이어간다.
 - 캘린더/DB 연동 전에는 `existing_schedules`를 요청으로 받아 기존 일정 충돌 검증을 실험한다.
 - DB 저장은 에이전트 노드가 아니라 API 또는 서비스 레이어에서 처리한다.
 - 스트리밍 API는 `stream_mode=["updates", "values"]`로 그래프를 한 번만 실행한다. `updates`는 노드 진행 이벤트에, 마지막 `values`는 최종 응답에 사용한다.
@@ -20,6 +20,8 @@ Accepted
 - 요청 일정과 기존 일정에 위치가 명시된 경우, LLM은 일정 사이 이동 시간이 명백히 부족한지도 검증한다.
 - 위치 이동 검증에 필요한 장소 제약이 불명확하면 `pre_validate`도 기존 질문 흐름을 사용한다.
 - 분류 질문과 사전 검증 질문은 `question_source`, `classification_retry`, `pre_validation_retry`로 의미와 재시도 횟수를 분리한다.
+- 분류 노드는 `is_decomposable`로 하위 task 분해 필요성을 판단한다. 분해 불필요 일정은 추가 질문하지 않지만 일정 유효성 검증은 거치며, 유효하면 `tasks=[]`인 성공 응답으로 종료한다.
+- `context_answer`가 있는 후속 요청은 먼저 `ask_context`에서 답변을 `detail_with_context`에 누적한 뒤, 질문 출처에 따라 분류 또는 사전 검증 노드로 재진입한다.
 
 ## Consequences
 - 각 단계의 책임과 테스트 지점이 명확해진다.
@@ -34,3 +36,4 @@ Accepted
 - 위치가 없거나 이동 가능 여부가 불명확한 일정은 위치 정보만으로 거절하지 않는다.
 - 검증 모델 오류가 발생한 일정은 계획 단계로 통과하지 않는다.
 - 질문 출처별 재시도 횟수가 섞이지 않아 한 노드의 질문이 다른 노드의 질문 기회를 소모하지 않는다.
+- 분해 불필요 일정은 실패가 아니므로 fallback이 아니라 정상 응답으로 표현된다.
