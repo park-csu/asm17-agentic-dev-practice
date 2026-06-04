@@ -132,8 +132,10 @@ def pre_validate_schedule(state: AgentState, *, strict: bool = False) -> dict:
     detail_with_context = state.get("detail_with_context") or state.get("detail", "")
     location = state.get("location", "")
     context_answer = state.get("context_answer", "")
-    pre_validation_question = state.get("pre_validation_question", "")
-    validation_context_answer = context_answer if pre_validation_question.strip() else ""
+    question = state.get("question", "")
+    question_source = state.get("question_source", "")
+    validation_question = question if question_source == "pre_validate" else ""
+    validation_context_answer = context_answer if validation_question.strip() else ""
     start_time = state.get("start_time", "")
     end_time = state.get("end_time", "")
     existing_schedules = state.get("existing_schedules", [])
@@ -193,7 +195,7 @@ def pre_validate_schedule(state: AgentState, *, strict: bool = False) -> dict:
                         f"title: {title}\n"
                         f"detail_with_context: {detail_with_context}\n"
                         f"location: {location}\n"
-                        f"pre_validation_question: {pre_validation_question}\n"
+                        f"validation_question: {validation_question}\n"
                         f"context_answer: {validation_context_answer}\n"
                         f"start_time: {start_time}\n"
                         f"end_time: {end_time}\n"
@@ -229,7 +231,6 @@ def pre_validate_schedule(state: AgentState, *, strict: bool = False) -> dict:
                 }
             result_dict["is_valid"] = False
             result_dict["question_source"] = "pre_validate"
-            result_dict["pre_validation_question"] = result_dict["question"]
             result_dict["invalid_reason"] = ""
             return result_dict
         if not result_dict["is_valid"] and not result_dict["invalid_reason"].strip():

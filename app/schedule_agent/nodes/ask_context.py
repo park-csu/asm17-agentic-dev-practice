@@ -22,7 +22,6 @@ def ask_context(state: AgentState) -> dict:
     }
     if question_source == "pre_validate":
         result["pre_validation_retry"] = state.get("pre_validation_retry", 0) + 1
-        result["pre_validation_question"] = question
     else:
         result["classification_retry"] = state.get("classification_retry", 0) + 1
     return result

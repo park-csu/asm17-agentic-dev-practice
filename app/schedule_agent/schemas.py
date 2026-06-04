@@ -62,7 +62,6 @@ class AgentState(TypedDict, total=False):
     needs_question: bool
     question: str
     question_source: Literal["", "classification", "pre_validate"]
-    pre_validation_question: str
     is_valid: bool
     invalid_reason: str
 
@@ -90,7 +89,6 @@ class ScheduleTaskRequest(BaseModel):
     plan_retry: int = Field(default=0, ge=0)
     max_retry: int = Field(default=2, ge=0, le=5)
     question_source: Literal["", "classification", "pre_validate"] = ""
-    pre_validation_question: str = Field(default="", max_length=4000)
 
 
 class ScheduleTaskResponse(BaseModel):
@@ -108,7 +106,6 @@ class ScheduleTaskResponse(BaseModel):
     pre_validation_retry: int = 0
     plan_retry: int = 0
     question_source: Literal["", "classification", "pre_validate"] = ""
-    pre_validation_question: str = ""
     fallback_reason: str = ""
     answer: str = ""
 

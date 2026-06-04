@@ -49,10 +49,7 @@ class AskContextNodeTest(unittest.TestCase):
         self.assertEqual(result["status"], "needs_question")
         self.assertNotIn("classification_retry", result)
         self.assertEqual(result["pre_validation_retry"], 1)
-        self.assertEqual(
-            result["pre_validation_question"],
-            "이 작업은 현장 도착이 필수인가요?",
-        )
+        self.assertEqual(set(result), {"detail_with_context", "is_decomposable", "status", "pre_validation_retry"})
 
     def test_ask_context_increments_only_classification_retry(self):
         # classification 질문을 반환할 때는 classification_retry만 증가시킨다.

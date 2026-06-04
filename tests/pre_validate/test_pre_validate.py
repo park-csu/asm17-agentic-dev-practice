@@ -43,11 +43,11 @@ class PreValidateScheduleTest(unittest.TestCase):
         self.assertEqual(state["location"], "부산광역시")
         self.assertEqual(response.location, "부산광역시")
 
-    def test_api_state_and_response_preserve_pre_validation_question_state(self):
+    def test_api_state_and_response_preserve_question_state(self):
         request = ScheduleTaskRequest(
             pre_validation_retry=1,
             question_source="pre_validate",
-            pre_validation_question="이 작업은 현장 도착이 필수인가요?",
+            question="이 작업은 현장 도착이 필수인가요?",
         )
 
         state = build_initial_state(request)
@@ -55,10 +55,7 @@ class PreValidateScheduleTest(unittest.TestCase):
 
         self.assertEqual(state["pre_validation_retry"], 1)
         self.assertEqual(state["question_source"], "pre_validate")
-        self.assertEqual(
-            response.pre_validation_question,
-            "이 작업은 현장 도착이 필수인가요?",
-        )
+        self.assertEqual(response.question, "이 작업은 현장 도착이 필수인가요?")
 
     def test_rejects_when_title_and_detail_are_empty(self):
         result = pre_validate_schedule(
@@ -279,10 +276,7 @@ class PreValidateScheduleTest(unittest.TestCase):
 
         self.assertTrue(result["needs_question"])
         self.assertEqual(result["question_source"], "pre_validate")
-        self.assertEqual(
-            result["pre_validation_question"],
-            "이 문서 작업은 한국에 도착해야만 가능한가요?",
-        )
+        self.assertEqual(result["question"], "이 문서 작업은 한국에 도착해야만 가능한가요?")
         self.assertEqual(result["invalid_reason"], "")
 
     def test_forces_location_question_when_llm_returns_valid(self):
@@ -357,7 +351,7 @@ class PreValidateScheduleTest(unittest.TestCase):
         self.assertIn("도착", result["question"])
         self.assertNotIn("null string", result["question"])
 
-    def test_does_not_allow_non_location_pre_validation_question(self):
+    def test_does_not_allow_non_location_validation_question(self):
         expected = PreValidationResult(
             is_valid=False,
             needs_question=True,
@@ -431,10 +425,7 @@ class PreValidateScheduleTest(unittest.TestCase):
 
         self.assertNotIn("classification_retry", result)
         self.assertEqual(result["pre_validation_retry"], 1)
-        self.assertEqual(
-            result["pre_validation_question"],
-            "이 작업은 현장 도착이 필수인가요?",
-        )
+        self.assertEqual(set(result), {"detail_with_context", "is_decomposable", "status", "pre_validation_retry"})
 
     def test_ask_context_increments_only_classification_retry(self):
         result = ask_context(

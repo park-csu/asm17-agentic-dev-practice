@@ -10,7 +10,7 @@ Accepted
 - LangGraph를 사용해 각 단계를 별도 노드로 분리한다.
 - 추가 질문은 v1에서 interrupt/checkpointer 대신 `status="needs_question"` 응답으로 처리한다.
 - 일정 시간 입력은 단일 `time` 또는 마감일이 아니라 `start_time`/`end_time` 범위로 받는다.
-- 서버 상태 저장이 없는 v1에서는 `classification_retry`, `pre_validation_retry`, `plan_retry`, `detail_with_context`, `question`, `question_source`, `pre_validation_question`, `context_answer`를 요청/응답으로 전달해 LangGraph 상태를 이어간다.
+- 서버 상태 저장이 없는 v1에서는 `classification_retry`, `pre_validation_retry`, `plan_retry`, `detail_with_context`, `question`, `question_source`, `context_answer`를 요청/응답으로 전달해 LangGraph 상태를 이어간다.
 - 캘린더/DB 연동 전에는 `existing_schedules`를 요청으로 받아 기존 일정 충돌 검증을 실험한다.
 - DB 저장은 에이전트 노드가 아니라 API 또는 서비스 레이어에서 처리한다.
 - 스트리밍 API는 `stream_mode=["updates", "values"]`로 그래프를 한 번만 실행한다. `updates`는 노드 진행 이벤트에, 마지막 `values`는 최종 응답에 사용한다.

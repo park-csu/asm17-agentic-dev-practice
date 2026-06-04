@@ -29,9 +29,9 @@ _Avoid_: 실패한 일정, invalid 일정
 
 일정 시간은 단일 마감값이 아니라 `start_time`과 `end_time` 범위로 받습니다. 시간 파싱과 충돌 검증도 이 범위를 기준으로 판단합니다.
 
-현재 API 요청 모델의 `classification_retry`, `pre_validation_retry`, `plan_retry`, `detail_with_context`, `question`, `question_source`, `pre_validation_question`, `context_answer`는 정식 외부 API 계약이 아니라 LangGraph 프로토타입의 상태 전달 필드입니다. 서버 상태 저장이 아직 없기 때문에 추가 질문과 재시도 흐름을 요청/응답으로 이어가기 위해 유지합니다.
+현재 API 요청 모델의 `classification_retry`, `pre_validation_retry`, `plan_retry`, `detail_with_context`, `question`, `question_source`, `context_answer`는 정식 외부 API 계약이 아니라 LangGraph 프로토타입의 상태 전달 필드입니다. 서버 상태 저장이 아직 없기 때문에 추가 질문과 재시도 흐름을 요청/응답으로 이어가기 위해 유지합니다.
 
-분류 질문과 사전 검증 질문은 `question_source`로 출처를 구분합니다. 추가 질문에 대한 사용자 답변은 응답에서 받은 `question`, `question_source`, retry 값과 함께 다음 요청의 `context_answer`로 전달합니다. 사전 검증 질문의 사용자 답변은 `pre_validation_question`도 함께 전달해 유효성 검증 노드가 질문과 답변을 함께 반영하게 합니다.
+분류 질문과 사전 검증 질문은 `question_source`로 출처를 구분합니다. 추가 질문에 대한 사용자 답변은 응답에서 받은 `question`, `question_source`, retry 값과 함께 다음 요청의 `context_answer`로 전달합니다. 유효성 검증 노드는 `question_source="pre_validate"`일 때만 `context_answer`를 사전 검증 질문의 답변으로 해석합니다.
 
 `existing_schedules`는 캘린더/DB 연동 전 기존 일정 충돌 검증을 테스트하기 위한 임시 입력입니다. 정식 API에서는 클라이언트가 직접 넘기기보다 서버가 Google Calendar 또는 PostgreSQL 저장소에서 조회합니다.
 

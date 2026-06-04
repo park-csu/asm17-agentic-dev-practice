@@ -42,7 +42,6 @@ def build_initial_state(request: ScheduleTaskRequest) -> dict:
         "needs_question": False,
         "question": request.question,
         "question_source": request.question_source,
-        "pre_validation_question": request.pre_validation_question,
         "is_valid": False,
         "invalid_reason": "",
         "normalized_schedule": {},
@@ -71,7 +70,6 @@ def build_response(result: dict) -> ScheduleTaskResponse:
         pre_validation_retry=result.get("pre_validation_retry", 0),
         plan_retry=result.get("plan_retry", 0),
         question_source=result.get("question_source", ""),
-        pre_validation_question=result.get("pre_validation_question", ""),
         fallback_reason=result.get("fallback_reason", ""),
         answer=result.get("answer", ""),
     )
