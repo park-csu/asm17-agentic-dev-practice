@@ -12,6 +12,7 @@
 ## 구성
 
 - `dataset.jsonl`: 평가 케이스. 각 줄은 `plan_tasks`의 입력인 `normalized_schedule`을 그대로 담습니다(노드 입력과 1:1). `notes`는 사람이 읽는 기대치 메모이며 채점에는 직접 쓰지 않습니다.
+  - **거부 후 교정(재생성) 케이스**: `invalid_reason`(post_validate 거부 사유)과 `rejected_tasks`(거부된 직전 task)를 추가로 담습니다. 이 두 필드가 있으면 `run_eval`이 `plan_tasks` 입력 state에 `invalid_reason` / `tasks` / `plan_retry=1`을 넣어, 운영 그래프가 post_validate 거부 후 plan에 재진입하는 상황을 모사합니다.
 - `run_eval.py`: 데이터셋을 읽어 `plan_tasks`를 실제로 실행하고, 규칙 기반 채점과 LLM-as-judge 채점을 합산해 리포트합니다.
 - `results.jsonl`: 실행 산출물. 케이스별 상세 + 마지막 줄에 전체 summary가 기록됩니다(.gitignore 대상).
 
@@ -19,6 +20,7 @@
 
 1. **규칙 기반(결정적, LLM 불필요)**: task 개수 1~5, `order_index` 1..n 연속, `estimated_minutes` 양의 정수, 제목 중복 없음, 빈 제목 없음.
 2. **LLM-as-judge(주관 품질)**: `relevance / actionability / coverage / ordering` 각 1~5점 + 근거. `get_llm().with_structured_output()` 패턴을 그대로 재사용합니다.
+3. **교정 judge(재생성 케이스 한정)**: `invalid_reason`이 있는 케이스에 대해서만 추가 호출됩니다. `resolves_reason`(거부 사유 해소 정도) / `avoids_repeat`(거부된 task 반복 회피 정도)를 각 1~5점으로 채점해, `plan_tasks`가 거부 사유를 반영해 제대로 교정했는지를 측정합니다.
 
 ## 실행
 
