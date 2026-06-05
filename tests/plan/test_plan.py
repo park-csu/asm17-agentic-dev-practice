@@ -40,6 +40,49 @@ class PlanTasksTest(unittest.TestCase):
         self.assertEqual(result["plan_reason"], "발표 준비를 3단계로 분해했습니다.")
         self.assertEqual(result["plan_retry"], 1)
 
+    def test_plan_tasks_feeds_invalid_reason_into_prompt_on_retry(self):
+        # post_validate가 채운 invalid_reason과 직전 task가 재생성 프롬프트에 반영되어야 한다.
+        plan_result = PlanResult(
+            tasks=[ScheduleTask(title="자료 조사", description="", estimated_minutes=30, order_index=1)],
+            plan_reason="",
+        )
+        mock_get_llm = self._patch_llm(plan_result=plan_result)
+        structured_llm = mock_get_llm.return_value.with_structured_output.return_value
+
+        rejected_tasks = [{"title": "열심히 하기", "description": "", "estimated_minutes": 30, "order_index": 1}]
+        result = plan_tasks(
+            {
+                "normalized_schedule": {"title": "발표 준비"},
+                "invalid_reason": "task 제목이 추상적인 구호라 실행 행동이 아닙니다.",
+                "tasks": rejected_tasks,
+                "plan_retry": 1,
+            }
+        )
+
+        # LLM에 전달된 사용자 메시지에 거부 사유와 직전 task가 포함되어야 한다.
+        human_message = structured_llm.invoke.call_args.args[0][1].content
+        self.assertIn("invalid_reason", human_message)
+        self.assertIn("추상적인 구호", human_message)
+        self.assertIn("rejected_tasks", human_message)
+        # 재생성으로 거부 사유를 소비했으므로 invalid_reason은 비워서 반환한다.
+        self.assertEqual(result["invalid_reason"], "")
+        self.assertEqual(result["plan_retry"], 2)
+
+    def test_plan_tasks_omits_retry_block_on_first_attempt(self):
+        # 최초 진입(invalid_reason 없음)에는 거부 사유 블록 없이 일정만 전달한다.
+        plan_result = PlanResult(
+            tasks=[ScheduleTask(title="자료 조사", description="", estimated_minutes=30, order_index=1)],
+            plan_reason="",
+        )
+        mock_get_llm = self._patch_llm(plan_result=plan_result)
+        structured_llm = mock_get_llm.return_value.with_structured_output.return_value
+
+        plan_tasks({"normalized_schedule": {"title": "발표 준비"}, "plan_retry": 0})
+
+        human_message = structured_llm.invoke.call_args.args[0][1].content
+        self.assertNotIn("invalid_reason", human_message)
+        self.assertNotIn("재생성 요청", human_message)
+
     def test_plan_tasks_increments_existing_plan_retry(self):
         # 기존 plan_retry 값이 있으면 1만큼 증가시켜 반환한다.
         plan_result = PlanResult(

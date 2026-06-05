@@ -38,13 +38,38 @@ def _normalize_task_fields(tasks: list[dict], normalized_schedule: dict) -> list
     return tasks
 
 
+def _build_plan_human_message(normalized_schedule: dict, invalid_reason: str, previous_tasks: list[dict]) -> str:
+    """plan LLM 호출용 사용자 메시지를 구성한다.
+
+    post_validate가 task를 거부해 plan으로 재진입한 경우(invalid_reason이 채워진 경우)에는
+    거부 사유와 직전 task를 함께 전달해, 같은 문제를 반복하지 않고 교정하도록 유도한다.
+    최초 진입(invalid_reason이 비어 있는 경우)에는 정규화된 일정만 전달한다.
+    """
+    lines = [f"normalized_schedule: {normalized_schedule}"]
+    if invalid_reason:
+        lines.append("")
+        lines.append("[재생성 요청] 직전에 생성한 task가 사후 검증에서 다음 사유로 거부되었습니다.")
+        lines.append(f"invalid_reason: {invalid_reason}")
+        if previous_tasks:
+            lines.append(f"rejected_tasks: {previous_tasks}")
+        lines.append("위 거부 사유를 반드시 해소하도록 task를 다시 구성하세요. 거부된 task를 그대로 반복하지 마세요.")
+    return "\n".join(lines)
+
+
 def plan_tasks(state: AgentState) -> dict:
-    """정규화된 일정을 실행 가능한 task 1~5개로 분해한다."""
+    """정규화된 일정을 실행 가능한 task 1~5개로 분해한다.
+
+    post_validate에서 거부되어 재진입한 경우, state의 invalid_reason과 직전 task를
+    프롬프트에 반영해 거부 사유를 해소하는 방향으로 task를 재생성한다.
+    """
     normalized_schedule = state.get("normalized_schedule", {})
+    invalid_reason = state.get("invalid_reason", "")
+    previous_tasks = state.get("tasks", [])
 
     try:
         llm = get_llm(temperature=0.2).with_structured_output(PlanResult)
-        result = llm.invoke([SystemMessage(content=PLAN_SYSTEM), HumanMessage(content=f"normalized_schedule: {normalized_schedule}")])
+        human_message = _build_plan_human_message(normalized_schedule, invalid_reason, previous_tasks)
+        result = llm.invoke([SystemMessage(content=PLAN_SYSTEM), HumanMessage(content=human_message)])
         payload = result.model_dump()
     except Exception as e:
         logger.warning("Task planning failed: %s", e)
@@ -58,4 +83,11 @@ def plan_tasks(state: AgentState) -> dict:
         }
 
     tasks = _normalize_task_fields(payload.get("tasks", []), normalized_schedule)
-    return {"tasks": tasks, "plan_reason": payload.get("plan_reason", ""), "plan_retry": state.get("plan_retry", 0) + 1}
+    # 이번 재생성으로 직전 거부 사유를 소비했으므로 invalid_reason을 비운다.
+    # post_validate가 새 task를 다시 판단해 필요 시 새로운 사유를 채운다.
+    return {
+        "tasks": tasks,
+        "plan_reason": payload.get("plan_reason", ""),
+        "plan_retry": state.get("plan_retry", 0) + 1,
+        "invalid_reason": "",
+    }

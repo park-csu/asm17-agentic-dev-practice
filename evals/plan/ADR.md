@@ -8,6 +8,7 @@ Accepted
 
 ## Decision
 - **규칙 기반 + LLM-as-judge 하이브리드**로 채점한다. 구조적으로 단언 가능한 항목(개수, `order_index` 연속성, `estimated_minutes`, 제목 중복/공백)은 규칙으로 결정적으로 검증하고, 주관 품질(관련성·실행 구체성·포괄성·순서 타당성)은 LLM judge가 1~5점으로 채점한다.
+- **거부 후 교정(재생성) 경로를 별도 시나리오로 평가한다.** `plan_tasks`는 post_validate에서 거부되면 `invalid_reason`과 직전 task를 반영해 재생성하는데, 최초 분해만 평가하면 이 교정 품질의 회귀를 잡지 못한다. 따라서 데이터셋에 `invalid_reason`/`rejected_tasks`를 담은 재생성 케이스를 추가하고, 전용 교정 judge(`resolves_reason`/`avoids_repeat`)로 거부 사유 해소 여부를 채점한다. 교정 judge는 재생성 케이스에만 호출해 일반 케이스의 비용을 늘리지 않는다.
 - 데이터셋 포맷은 **jsonl**로 한다. 한 줄이 한 케이스라 추가·삭제가 쉽고 diff가 깔끔하며, 케이스별 스트리밍 처리가 용이하다.
 - judge 점수 스키마(`PlanJudgeResult`)는 **`run_eval.py` 내부에 eval 전용으로 정의**한다. 평가 전용 타입을 `app/schedule_agent/schemas.py`에 넣어 운영 코드 스키마를 오염시키지 않는다.
 - judge는 **temperature=0.0**으로 호출해 채점 변동을 최소화한다.
@@ -17,7 +18,7 @@ Accepted
 
 ## Consequences
 - LLM 분해 품질의 회귀를 점수 추세로 감지할 수 있다.
-- 실제 Upstage 호출로 **비용과 지연**이 발생하므로 매 커밋이 아니라 필요 시 수동 실행한다.
+- 실제 Upstage 호출로 **비용과 지연**이 발생하므로 매 커밋이 아니라 필요 시 수동 실행한다. 일반 케이스는 생성 1회 + judge 1회지만, 재생성 케이스는 교정 judge 1회가 더해져 **케이스당 3회 호출**이 발생한다.
 - judge 자체가 LLM이라 채점도 비결정적이다. temperature=0.0과 다수 케이스 평균으로 변동을 완화하지만, 합격선(예: judge 평균 ≥ 3.5, 규칙 통과율 100%)은 운영하며 보정해야 한다.
 - judge 신뢰도 검증(사람 채점과의 일치도)이나 케이스 확장은 후속 과제로 남긴다.
 - 다른 노드 eval이 필요하면 `evals/<노드명>/` 구조를 동일하게 따른다.

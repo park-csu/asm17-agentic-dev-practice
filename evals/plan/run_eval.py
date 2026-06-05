@@ -48,6 +48,27 @@ class PlanJudgeResult(BaseModel):
 
 JUDGE_DIMENSIONS = ["relevance", "actionability", "coverage", "ordering"]
 
+CORRECTION_JUDGE_SYSTEM = """당신은 일정 task '재생성' 결과가 직전 거부 사유를 제대로 교정했는지 평가하는 평가자입니다.
+직전에 생성된 task(rejected_tasks)가 invalid_reason 사유로 사후 검증에서 거부되었고, 이를 반영해 새 task(tasks)가 다시 생성되었습니다.
+아래 2개 기준을 각각 1~5점으로 채점하세요.
+
+채점 기준 (1=매우 나쁨, 5=매우 좋음):
+1. resolves_reason: 새 task가 invalid_reason에서 지적한 문제를 실제로 해소했는가.
+2. avoids_repeat: 거부된 task를 그대로 반복하지 않고 의미 있게 달라졌는가.
+
+reasoning에는 점수를 그렇게 준 핵심 근거를 한국어로 간단히 적으세요.
+반드시 지정된 구조화 출력 형식으로만 응답하세요."""
+
+
+# 거부 후 재생성 케이스의 교정 품질 judge 스키마 (eval 전용, app 스키마와 분리)
+class CorrectionJudgeResult(BaseModel):
+    resolves_reason: int = Field(ge=1, le=5, description="거부 사유(invalid_reason) 해소 정도")
+    avoids_repeat: int = Field(ge=1, le=5, description="거부된 task 반복 회피 정도")
+    reasoning: str = Field(default="", description="점수 근거")
+
+
+CORRECTION_DIMENSIONS = ["resolves_reason", "avoids_repeat"]
+
 
 def load_dataset() -> list[dict]:
     """dataset.jsonl을 한 줄씩 읽어 케이스 목록으로 반환한다."""
@@ -96,13 +117,45 @@ def score_with_judge(normalized_schedule: dict, tasks: list[dict]) -> PlanJudgeR
     )
 
 
+def score_correction(invalid_reason: str, rejected_tasks: list[dict], new_tasks: list[dict]) -> CorrectionJudgeResult:
+    """재생성된 task가 직전 거부 사유를 해소했는지 LLM judge로 1~5점 채점한다."""
+    llm = get_llm(temperature=0.0).with_structured_output(CorrectionJudgeResult)
+    return llm.invoke(
+        [
+            SystemMessage(content=CORRECTION_JUDGE_SYSTEM),
+            HumanMessage(
+                content=(
+                    f"invalid_reason: {invalid_reason}\n"
+                    f"rejected_tasks: {json.dumps(rejected_tasks, ensure_ascii=False)}\n"
+                    f"tasks: {json.dumps(new_tasks, ensure_ascii=False)}"
+                )
+            ),
+        ]
+    )
+
+
 def evaluate_case(case: dict) -> dict:
-    """단일 케이스에 대해 plan_tasks 실행 → 규칙 채점 → judge 채점을 수행한다."""
+    """단일 케이스에 대해 plan_tasks 실행 → 규칙 채점 → judge 채점을 수행한다.
+
+    invalid_reason이 있는 케이스는 'post_validate 거부 후 재생성' 시나리오로 보고,
+    거부 사유와 직전 task(rejected_tasks)를 함께 입력해 교정 품질(correction)까지 채점한다.
+    """
     case_id = case.get("id", "unknown")
     normalized_schedule = case.get("normalized_schedule", {})
+    invalid_reason = case.get("invalid_reason", "")
+    rejected_tasks = case.get("rejected_tasks", [])
+    is_retry = bool(invalid_reason)
+
+    # plan_tasks 입력 상태 구성. 재생성 케이스는 거부 사유/직전 task/재시도 회차를 함께 넣어
+    # 운영 그래프가 post_validate 거부 후 plan에 재진입하는 상황을 그대로 모사한다.
+    state = {"normalized_schedule": normalized_schedule}
+    if is_retry:
+        state["invalid_reason"] = invalid_reason
+        state["tasks"] = rejected_tasks
+        state["plan_retry"] = 1
 
     # 평가 대상 노드를 실제로 실행한다 (내부에서 실제 LLM 호출).
-    plan_output = plan_tasks({"normalized_schedule": normalized_schedule})
+    plan_output = plan_tasks(state)
     tasks = plan_output.get("tasks", [])
     plan_reason = plan_output.get("plan_reason", "")
     is_fallback = FALLBACK_MARKER in plan_reason
@@ -111,6 +164,7 @@ def evaluate_case(case: dict) -> dict:
 
     record = {
         "id": case_id,
+        "is_retry": is_retry,
         "num_tasks": len(tasks),
         "is_fallback": is_fallback,
         "rules": rules,
@@ -130,22 +184,45 @@ def evaluate_case(case: dict) -> dict:
         record["judge"] = None
         record["error"] = f"judge 호출 실패: {e}"
 
+    # 재생성 케이스는 거부 사유 교정 품질을 추가로 채점한다.
+    if is_retry:
+        try:
+            correction = score_correction(invalid_reason, rejected_tasks, tasks)
+            correction_scores = {dim: getattr(correction, dim) for dim in CORRECTION_DIMENSIONS}
+            record["correction"] = {
+                **correction_scores,
+                "average": round(sum(correction_scores.values()) / len(CORRECTION_DIMENSIONS), 2),
+                "reasoning": correction.reasoning,
+            }
+        except Exception as e:
+            record["correction"] = None
+            record["correction_error"] = f"correction judge 호출 실패: {e}"
+
     return record
 
 
 def aggregate(records: list[dict]) -> dict:
     """케이스별 결과를 전체 지표로 집계한다."""
     judged = [r for r in records if r.get("judge")]
+    corrected = [r for r in records if r.get("correction")]
     summary = {
         "case_count": len(records),
+        "retry_case_count": sum(1 for r in records if r.get("is_retry")),
         "fallback_count": sum(1 for r in records if r["is_fallback"]),
         "judge_error_count": sum(1 for r in records if r.get("error")),
+        "correction_error_count": sum(1 for r in records if r.get("correction_error")),
         "avg_rule_pass_rate": round(sum(r["rules"]["pass_rate"] for r in records) / len(records), 1) if records else 0.0,
     }
     for dim in JUDGE_DIMENSIONS:
         summary[f"avg_{dim}"] = round(sum(r["judge"][dim] for r in judged) / len(judged), 2) if judged else None
     summary["avg_judge_overall"] = (
         round(sum(r["judge"]["average"] for r in judged) / len(judged), 2) if judged else None
+    )
+    # 재생성 케이스의 교정 품질 집계 (해당 케이스가 없으면 None)
+    for dim in CORRECTION_DIMENSIONS:
+        summary[f"avg_{dim}"] = round(sum(r["correction"][dim] for r in corrected) / len(corrected), 2) if corrected else None
+    summary["avg_correction_overall"] = (
+        round(sum(r["correction"]["average"] for r in corrected) / len(corrected), 2) if corrected else None
     )
     return summary
 
@@ -162,6 +239,13 @@ def print_report(records: list[dict], summary: dict) -> None:
         else:
             row = f"{r['id']:<26} {r['num_tasks']:>5} {r['rules']['pass_rate']:>6} {'-':>4} {'-':>4} {'-':>4} {'-':>4} {'-':>5}"
         note = "FALLBACK" if r["is_fallback"] else ""
+        # 재생성 케이스는 교정 점수(거부 사유 해소/반복 회피)를 비고에 함께 표시한다.
+        if r.get("is_retry"):
+            c = r.get("correction")
+            if c:
+                note = (note + f" 교정(해소={c['resolves_reason']} 비반복={c['avoids_repeat']})").strip()
+            elif r.get("correction_error"):
+                note = (note + " " + r["correction_error"]).strip()
         if r.get("error"):
             note = (note + " " + r["error"]).strip()
         print(f"{row}  {note}")
@@ -176,6 +260,13 @@ def print_report(records: list[dict], summary: dict) -> None:
     print(f"judge 전체 평균      : {summary['avg_judge_overall']}")
     print(f"fallback 발생 수     : {summary['fallback_count']}")
     print(f"judge 오류 케이스 수 : {summary['judge_error_count']}")
+    # 재생성(거부 후 교정) 케이스가 있을 때만 교정 지표를 출력한다.
+    if summary["retry_case_count"]:
+        print(f"재생성 케이스 수     : {summary['retry_case_count']}")
+        print(f"교정 해소(resolves)  : {summary['avg_resolves_reason']}")
+        print(f"교정 비반복(avoids)  : {summary['avg_avoids_repeat']}")
+        print(f"교정 전체 평균       : {summary['avg_correction_overall']}")
+        print(f"교정 judge 오류 수   : {summary['correction_error_count']}")
 
 
 def main() -> int:
@@ -190,7 +281,12 @@ def main() -> int:
         return 1
 
     cases = load_dataset()
-    print(f"{len(cases)}개 케이스를 평가합니다 (케이스당 생성 1회 + judge 1회, 실제 LLM 호출).")
+    retry_count = sum(1 for c in cases if c.get("invalid_reason"))
+    # 일반 케이스는 생성 1회 + judge 1회, 재생성 케이스는 교정 judge 1회가 더해져 3회 호출된다.
+    print(
+        f"{len(cases)}개 케이스를 평가합니다 "
+        f"(일반 케이스: 생성 1회 + judge 1회 / 재생성 케이스 {retry_count}개: 교정 judge 1회 추가, 실제 LLM 호출)."
+    )
 
     records = [evaluate_case(case) for case in cases]
     summary = aggregate(records)
