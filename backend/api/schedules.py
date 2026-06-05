@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -14,7 +14,7 @@ from app.schedule_agent.schemas import StreamEvent
 from backend.db.models import Schedule, Task
 from backend.db.session import AsyncSessionLocal, get_session
 
-router = APIRouter()
+router = APIRouter(tags=["schedules"])
 graph = create_graph()
 
 STREAM_NODE_NAMES = {"pre_validate", "classification", "ask_context", "plan", "post_validate", "output", "fallback"}
@@ -23,55 +23,83 @@ STREAM_NODE_NAMES = {"pre_validate", "classification", "ask_context", "plan", "p
 # ── 요청/응답 모델 ──────────────────────────────────────────────
 
 class CreateScheduleRequest(BaseModel):
-    title: Optional[str] = None
-    detail: str = ""
-    location: str = ""
-    start_time: str = ""
-    end_time: str = ""
-    detail_with_context: str = ""
-    context_answer: str = ""
-    question: str = ""
-    question_source: Literal["", "classification", "pre_validate"] = ""
-    classification_retry: int = 0
-    pre_validation_retry: int = 0
-    plan_retry: int = 0
-    max_retry: int = 2
+    model_config = {"json_schema_extra": {
+        "examples": [{
+            "title": "기말 발표 준비",
+            "detail": "딥러닝 논문 리뷰 발표를 위해 논문 정리하고 슬라이드 10장 만들기",
+            "location": "서울특별시",
+            "start_time": "2026-06-10T10:00:00",
+            "end_time": "2026-06-10T12:00:00",
+            "max_retry": 2,
+        }]
+    }}
+
+    title: Optional[str] = Field(default=None, description="일정 제목")
+    detail: str = Field(default="", description="일정 상세 내용")
+    location: str = Field(default="", description="일정 장소")
+    start_time: str = Field(default="", description="시작 시간 (ISO 8601)")
+    end_time: str = Field(default="", description="종료 시간 (ISO 8601)")
+    detail_with_context: str = Field(default="", description="누적된 일정 상세 컨텍스트 (재요청 시 이전 응답값 그대로 전달)")
+    context_answer: str = Field(default="", description="추가 질문에 대한 사용자 답변")
+    question: str = Field(default="", description="이전 응답에서 받은 질문 (재요청 시 그대로 전달)")
+    question_source: Literal["", "classification", "pre_validate"] = Field(default="", description="질문 출처")
+    classification_retry: int = Field(default=0, description="분류 재시도 횟수 (이전 응답값 그대로 전달)")
+    pre_validation_retry: int = Field(default=0, description="사전 검증 재시도 횟수 (이전 응답값 그대로 전달)")
+    plan_retry: int = Field(default=0, description="계획 재시도 횟수 (이전 응답값 그대로 전달)")
+    max_retry: int = Field(default=2, description="노드별 최대 재시도 횟수")
 
 
 class UpdateScheduleRequest(BaseModel):
-    title: Optional[str] = None
-    detail: Optional[str] = None
-    location: Optional[str] = None
+    model_config = {"json_schema_extra": {"examples": [{"title": "수정된 발표 제목", "location": "부산광역시"}]}}
+
+    title: Optional[str] = Field(default=None, description="변경할 제목")
+    detail: Optional[str] = Field(default=None, description="변경할 상세 내용")
+    location: Optional[str] = Field(default=None, description="변경할 장소")
 
 
 class UpdateTaskRequest(BaseModel):
-    is_done: Optional[bool] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
-    estimated_minutes: Optional[int] = None
+    model_config = {"json_schema_extra": {"examples": [{"is_done": True}]}}
+
+    is_done: Optional[bool] = Field(default=None, description="완료 여부")
+    title: Optional[str] = Field(default=None, description="변경할 태스크 제목")
+    description: Optional[str] = Field(default=None, description="변경할 태스크 설명")
+    estimated_minutes: Optional[int] = Field(default=None, description="변경할 예상 소요 시간(분)")
+
+
+class RegenerateScheduleRequest(BaseModel):
+    model_config = {"json_schema_extra": {"examples": [{"max_retry": 0}]}}
+
+    context_answer: str = Field(default="", description="추가 질문에 대한 사용자 답변")
+    question: str = Field(default="", description="이전 응답에서 받은 질문")
+    question_source: Literal["", "classification", "pre_validate"] = Field(default="", description="질문 출처")
+    classification_retry: int = Field(default=0, description="분류 재시도 횟수")
+    pre_validation_retry: int = Field(default=0, description="사전 검증 재시도 횟수")
+    plan_retry: int = Field(default=0, description="계획 재시도 횟수")
+    max_retry: int = Field(default=2, description="노드별 최대 재시도 횟수")
+    detail_with_context: str = Field(default="", description="누적된 일정 상세 컨텍스트")
 
 
 class TaskResponse(BaseModel):
-    id: str
-    title: str
-    description: str
-    estimated_minutes: int
-    order_index: int
-    is_done: bool
+    id: str = Field(description="태스크 UUID")
+    title: str = Field(description="태스크 제목")
+    description: str = Field(description="태스크 설명")
+    estimated_minutes: int = Field(description="예상 소요 시간(분)")
+    order_index: int = Field(description="실행 순서")
+    is_done: bool = Field(description="완료 여부")
 
 
 class ScheduleResponse(BaseModel):
-    id: str
-    title: str
-    detail: str
-    location: str
-    start_time: Optional[str]
-    end_time: Optional[str]
-    status: str
-    fallback_reason: str
-    is_decomposable: bool
-    created_at: str
-    tasks: list[TaskResponse] = []
+    id: str = Field(description="일정 UUID")
+    title: str = Field(description="일정 제목")
+    detail: str = Field(description="일정 상세 내용")
+    location: str = Field(description="일정 장소")
+    start_time: Optional[str] = Field(description="시작 시간 (ISO 8601)")
+    end_time: Optional[str] = Field(description="종료 시간 (ISO 8601)")
+    status: str = Field(description="에이전트 처리 결과 (ok / needs_question / fallback)")
+    fallback_reason: str = Field(description="실패 이유 (status가 fallback일 때)")
+    is_decomposable: bool = Field(description="서브태스크 분해 필요 여부")
+    created_at: str = Field(description="생성 시각 (ISO 8601)")
+    tasks: list[TaskResponse] = Field(default=[], description="생성된 서브태스크 목록")
 
 
 # ── 헬퍼 ───────────────────────────────────────────────────────
@@ -200,9 +228,74 @@ def to_schedule_response(schedule: Schedule, tasks: list[Task]) -> ScheduleRespo
 
 # ── 엔드포인트 ─────────────────────────────────────────────────
 
-@router.post("/stream")
+_STREAM_RESPONSE_DESC = """
+**Content-Type:** `text/event-stream`
+
+각 줄은 `data: <JSON>\\n\\n` 형식입니다.
+
+### node 이벤트
+에이전트 노드 실행마다 전송됩니다.
+
+```
+data: {"event": "node", "node": "pre_validate", "data": "{...}"}
+data: {"event": "node", "node": "classification", "data": "{...}"}
+data: {"event": "node", "node": "plan", "data": "{...}"}
+data: {"event": "node", "node": "post_validate", "data": "{...}"}
+data: {"event": "node", "node": "output", "data": "{...}"}
+```
+
+노드별 `data` 필드 (JSON 문자열):
+
+| node | 주요 필드 |
+|------|----------|
+| `pre_validate` | `is_valid`, `needs_question`, `question`, `invalid_reason` |
+| `classification` | `is_decomposable`, `needs_question`, `question`, `question_source` |
+| `ask_context` | `detail_with_context`, `status`, `classification_retry` |
+| `plan` | `tasks[]{title, estimated_minutes, order_index}` |
+| `post_validate` | `is_valid`, `tasks[]` |
+| `output` | `status: "ok"`, `tasks[]`, `answer` |
+| `fallback` | `status: "fallback"`, `fallback_reason` |
+
+### done 이벤트
+스트리밍 완료 후 DB 저장이 끝나면 전송됩니다.
+
+```
+data: {"event": "done", "node": "", "data": "{...}"}
+```
+
+`data` 필드:
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `schedule_id` | string | 저장된 일정 UUID |
+| `status` | string | `ok` / `needs_question` / `fallback` |
+| `tasks` | array | 생성된 서브태스크 목록 |
+| `question` | string | 추가 질문 (needs_question일 때) |
+| `question_source` | string | `classification` / `pre_validate` |
+| `classification_retry` | int | 분류 재시도 횟수 |
+| `pre_validation_retry` | int | 사전 검증 재시도 횟수 |
+| `plan_retry` | int | 계획 재시도 횟수 |
+| `detail_with_context` | string | 누적 컨텍스트 |
+| `fallback_reason` | string | 실패 이유 |
+"""
+
+
+@router.post(
+    "/stream",
+    summary="일정 생성 및 에이전트 실행 (SSE)",
+    description=f"""
+일정을 생성하고 LangGraph 에이전트를 SSE 스트리밍으로 실행합니다.
+
+에이전트가 추가 정보가 필요하면 `done` 이벤트에서 `status: needs_question`과 `question`을 반환합니다.
+이 경우 사용자 답변을 `context_answer`에 담아 동일 엔드포인트를 재호출하면 에이전트가 이어서 실행됩니다.
+
+재요청 시 `done` 이벤트에서 받은 `question`, `question_source`, retry 값, `detail_with_context`를 그대로 포함해야 합니다.
+
+{_STREAM_RESPONSE_DESC}
+""",
+    responses={200: {"description": "SSE 스트림", "content": {"text/event-stream": {}}}},
+)
 async def create_schedule_stream(req: CreateScheduleRequest):
-    """일정 에이전트를 SSE 스트리밍으로 실행하고 결과를 DB에 저장한다."""
     async with AsyncSessionLocal() as session:
         existing = await get_overlapping_schedules(session, req.start_time, req.end_time)
 
@@ -244,9 +337,13 @@ async def create_schedule_stream(req: CreateScheduleRequest):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-@router.get("", response_model=list[ScheduleResponse])
+@router.get(
+    "",
+    response_model=list[ScheduleResponse],
+    summary="일정 목록 조회",
+    description="저장된 모든 일정을 최신순으로 반환합니다. 각 일정에 서브태스크 목록이 포함됩니다.",
+)
 async def list_schedules(session: AsyncSession = Depends(get_session)):
-    """저장된 일정 목록을 반환한다."""
     results = await session.exec(select(Schedule).order_by(Schedule.created_at.desc()))
     schedules = results.all()
     response = []
@@ -256,9 +353,14 @@ async def list_schedules(session: AsyncSession = Depends(get_session)):
     return response
 
 
-@router.get("/{schedule_id}", response_model=ScheduleResponse)
+@router.get(
+    "/{schedule_id}",
+    response_model=ScheduleResponse,
+    summary="일정 상세 조회",
+    description="일정 UUID로 상세 정보와 서브태스크 목록을 반환합니다.",
+    responses={404: {"description": "일정을 찾을 수 없음"}},
+)
 async def get_schedule(schedule_id: UUID, session: AsyncSession = Depends(get_session)):
-    """일정 상세와 태스크 목록을 반환한다."""
     schedule = await session.get(Schedule, schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
@@ -266,13 +368,18 @@ async def get_schedule(schedule_id: UUID, session: AsyncSession = Depends(get_se
     return to_schedule_response(schedule, task_results.all())
 
 
-@router.patch("/{schedule_id}", response_model=ScheduleResponse)
+@router.patch(
+    "/{schedule_id}",
+    response_model=ScheduleResponse,
+    summary="일정 수정",
+    description="일정의 제목, 상세 내용, 장소를 수정합니다. 변경할 필드만 포함하면 됩니다.",
+    responses={404: {"description": "일정을 찾을 수 없음"}},
+)
 async def update_schedule(
     schedule_id: UUID,
     req: UpdateScheduleRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    """일정 제목, 상세, 위치를 수정한다."""
     schedule = await session.get(Schedule, schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
@@ -289,9 +396,14 @@ async def update_schedule(
     return to_schedule_response(schedule, task_results.all())
 
 
-@router.delete("/{schedule_id}", status_code=204)
+@router.delete(
+    "/{schedule_id}",
+    status_code=204,
+    summary="일정 삭제",
+    description="일정과 연결된 모든 서브태스크를 삭제합니다.",
+    responses={404: {"description": "일정을 찾을 수 없음"}},
+)
 async def delete_schedule(schedule_id: UUID, session: AsyncSession = Depends(get_session)):
-    """일정과 연결된 태스크를 모두 삭제한다."""
     schedule = await session.get(Schedule, schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
@@ -302,14 +414,19 @@ async def delete_schedule(schedule_id: UUID, session: AsyncSession = Depends(get
     await session.commit()
 
 
-@router.patch("/{schedule_id}/tasks/{task_id}", response_model=TaskResponse)
+@router.patch(
+    "/{schedule_id}/tasks/{task_id}",
+    response_model=TaskResponse,
+    summary="태스크 수정",
+    description="태스크의 완료 여부, 제목, 설명, 예상 시간을 수정합니다. 변경할 필드만 포함하면 됩니다.",
+    responses={404: {"description": "태스크를 찾을 수 없음"}},
+)
 async def update_task(
     schedule_id: UUID,
     task_id: UUID,
     req: UpdateTaskRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    """태스크 완료 여부 및 내용을 수정한다."""
     task = await session.get(Task, task_id)
     if not task or task.schedule_id != schedule_id:
         raise HTTPException(status_code=404, detail="태스크를 찾을 수 없습니다.")
@@ -334,13 +451,18 @@ async def update_task(
     )
 
 
-@router.delete("/{schedule_id}/tasks/{task_id}", status_code=204)
+@router.delete(
+    "/{schedule_id}/tasks/{task_id}",
+    status_code=204,
+    summary="태스크 삭제",
+    description="특정 서브태스크를 삭제합니다.",
+    responses={404: {"description": "태스크를 찾을 수 없음"}},
+)
 async def delete_task(
     schedule_id: UUID,
     task_id: UUID,
     session: AsyncSession = Depends(get_session),
 ):
-    """태스크를 삭제한다."""
     task = await session.get(Task, task_id)
     if not task or task.schedule_id != schedule_id:
         raise HTTPException(status_code=404, detail="태스크를 찾을 수 없습니다.")
@@ -348,24 +470,26 @@ async def delete_task(
     await session.commit()
 
 
-class RegenerateScheduleRequest(BaseModel):
-    context_answer: str = ""
-    question: str = ""
-    question_source: Literal["", "classification", "pre_validate"] = ""
-    classification_retry: int = 0
-    pre_validation_retry: int = 0
-    plan_retry: int = 0
-    max_retry: int = 2
-    detail_with_context: str = ""
+@router.post(
+    "/{schedule_id}/stream",
+    summary="태스크 재생성 (SSE)",
+    description=f"""
+기존 일정의 서브태스크를 에이전트로 재생성합니다. 기존 태스크는 삭제되고 새로 생성된 태스크로 교체됩니다.
 
+에이전트가 추가 질문을 반환한 경우, `context_answer`와 이전 응답의 retry/question 값을 담아 재호출하면 이어서 실행됩니다.
 
-@router.post("/{schedule_id}/stream")
+{_STREAM_RESPONSE_DESC}
+""",
+    responses={
+        200: {"description": "SSE 스트림", "content": {"text/event-stream": {}}},
+        404: {"description": "일정을 찾을 수 없음"},
+    },
+)
 async def regenerate_schedule_stream(
     schedule_id: UUID,
     req: RegenerateScheduleRequest = RegenerateScheduleRequest(),
     session: AsyncSession = Depends(get_session),
 ):
-    """기존 일정의 태스크를 에이전트로 재생성하고 SSE로 스트리밍한다."""
     schedule = await session.get(Schedule, schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
@@ -408,7 +532,6 @@ async def regenerate_schedule_stream(
             elif mode == "values":
                 final_state = chunk
 
-        # 기존 태스크 삭제 후 재저장
         async with AsyncSessionLocal() as write_session:
             old_tasks = await write_session.exec(select(Task).where(Task.schedule_id == schedule_id))
             for t in old_tasks.all():
@@ -432,6 +555,12 @@ async def regenerate_schedule_stream(
             "schedule_id": str(schedule_id),
             "status": final_state.get("status", "fallback"),
             "tasks": final_state.get("tasks", []),
+            "question": final_state.get("question", ""),
+            "question_source": final_state.get("question_source", ""),
+            "classification_retry": final_state.get("classification_retry", 0),
+            "pre_validation_retry": final_state.get("pre_validation_retry", 0),
+            "plan_retry": final_state.get("plan_retry", 0),
+            "detail_with_context": final_state.get("detail_with_context", ""),
             "fallback_reason": final_state.get("fallback_reason", ""),
         }
         done = StreamEvent(event="done", data=json.dumps(done_data, ensure_ascii=False, default=str))
