@@ -48,3 +48,7 @@ frontend/*.tsbuildinfo
 .DS_Store
 .idea/
 .vscode/
+
+# 클로드 개인 설정
+.claude/settings.local.json
+
