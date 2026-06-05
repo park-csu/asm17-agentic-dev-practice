@@ -334,8 +334,37 @@ async def update_task(
     )
 
 
+@router.delete("/{schedule_id}/tasks/{task_id}", status_code=204)
+async def delete_task(
+    schedule_id: UUID,
+    task_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """태스크를 삭제한다."""
+    task = await session.get(Task, task_id)
+    if not task or task.schedule_id != schedule_id:
+        raise HTTPException(status_code=404, detail="태스크를 찾을 수 없습니다.")
+    await session.delete(task)
+    await session.commit()
+
+
+class RegenerateScheduleRequest(BaseModel):
+    context_answer: str = ""
+    question: str = ""
+    question_source: Literal["", "classification", "pre_validate"] = ""
+    classification_retry: int = 0
+    pre_validation_retry: int = 0
+    plan_retry: int = 0
+    max_retry: int = 2
+    detail_with_context: str = ""
+
+
 @router.post("/{schedule_id}/stream")
-async def regenerate_schedule_stream(schedule_id: UUID, session: AsyncSession = Depends(get_session)):
+async def regenerate_schedule_stream(
+    schedule_id: UUID,
+    req: RegenerateScheduleRequest = RegenerateScheduleRequest(),
+    session: AsyncSession = Depends(get_session),
+):
     """기존 일정의 태스크를 에이전트로 재생성하고 SSE로 스트리밍한다."""
     schedule = await session.get(Schedule, schedule_id)
     if not schedule:
@@ -346,14 +375,22 @@ async def regenerate_schedule_stream(schedule_id: UUID, session: AsyncSession = 
         schedule.start_time.isoformat() if schedule.start_time else "",
         schedule.end_time.isoformat() if schedule.end_time else "",
     )
-    req = CreateScheduleRequest(
+    create_req = CreateScheduleRequest(
         title=schedule.title,
         detail=schedule.detail,
+        detail_with_context=req.detail_with_context or schedule.detail,
         location=schedule.location,
         start_time=schedule.start_time.isoformat() if schedule.start_time else "",
         end_time=schedule.end_time.isoformat() if schedule.end_time else "",
+        context_answer=req.context_answer,
+        question=req.question,
+        question_source=req.question_source,
+        classification_retry=req.classification_retry,
+        pre_validation_retry=req.pre_validation_retry,
+        plan_retry=req.plan_retry,
+        max_retry=req.max_retry,
     )
-    initial_state = build_agent_state(req, existing)
+    initial_state = build_agent_state(create_req, existing)
 
     async def gen():
         final_state: dict = {}
