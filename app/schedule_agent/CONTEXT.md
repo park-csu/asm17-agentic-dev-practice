@@ -4,8 +4,23 @@
 
 이 패키지는 LangGraph 워크플로우, 에이전트 상태/응답 스키마, LLM 프롬프트, 노드 함수를 함께 소유합니다.
 
+## Language
+
+**분해 가능 일정**:
+여러 실행 단계로 나누는 것이 사용자에게 실질적인 계획 가치를 주는 일정입니다.
+_Avoid_: 모든 일정, 단순 일정
+
+**분해 불필요 일정**:
+이미 하나의 단순 행동으로 충분해 하위 task 목록을 만들지 않는 일정입니다.
+_Avoid_: 실패한 일정, invalid 일정
+
+## Relationships
+
+- **분해 가능 일정**은 유효성 검증을 거쳐 하나 이상의 task로 계획됩니다.
+- **분해 불필요 일정**은 유효성 검증을 거친 뒤 task를 생성하지 않고 정상 응답으로 종료됩니다.
+
 현재 범위:
-- 일정 정보 충분성 판단
+- 일정이 좋은 task 목록으로 분해될 필요와 충분한 맥락이 있는지 판단
 - 추가 질문 필요 상태 반환
 - 일정 유효성 검증
 - task 1~5개 생성
@@ -14,9 +29,9 @@
 
 일정 시간은 단일 마감값이 아니라 `start_time`과 `end_time` 범위로 받습니다. 시간 파싱과 충돌 검증도 이 범위를 기준으로 판단합니다.
 
-현재 API 요청 모델의 `classification_retry`, `pre_validation_retry`, `plan_retry`, `detail_with_context`, `context_answer`는 정식 외부 API 계약이 아니라 LangGraph 프로토타입의 상태 전달 필드입니다. 서버 상태 저장이 아직 없기 때문에 추가 질문과 재시도 흐름을 요청/응답으로 이어가기 위해 유지합니다.
+현재 API 요청 모델의 `classification_retry`, `pre_validation_retry`, `plan_retry`, `detail_with_context`, `question`, `question_source`, `context_answer`는 정식 외부 API 계약이 아니라 LangGraph 프로토타입의 상태 전달 필드입니다. 서버 상태 저장이 아직 없기 때문에 추가 질문과 재시도 흐름을 요청/응답으로 이어가기 위해 유지합니다.
 
-분류 질문과 사전 검증 질문은 `question_source`로 출처를 구분합니다. 사전 검증 질문의 사용자 답변은 응답에서 받은 `pre_validation_question`, `pre_validation_retry`와 함께 다음 요청의 `context_answer`로 전달합니다.
+분류 질문과 사전 검증 질문은 `question_source`로 출처를 구분합니다. 추가 질문에 대한 사용자 답변은 응답에서 받은 `question`, `question_source`, retry 값과 함께 다음 요청의 `context_answer`로 전달합니다. 유효성 검증 노드는 `question_source="pre_validate"`일 때만 `context_answer`를 사전 검증 질문의 답변으로 해석합니다.
 
 `existing_schedules`는 캘린더/DB 연동 전 기존 일정 충돌 검증을 테스트하기 위한 임시 입력입니다. 정식 API에서는 클라이언트가 직접 넘기기보다 서버가 Google Calendar 또는 PostgreSQL 저장소에서 조회합니다.
 

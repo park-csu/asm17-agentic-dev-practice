@@ -12,7 +12,8 @@ class ScheduleTask(BaseModel):
 
 
 class ClassificationResult(BaseModel):
-    needs_question: bool = Field(description="추가 질문 필요 여부")
+    is_decomposable: bool = Field(description="일정이 여러 하위 task로 분해할 가치가 있는지 여부")
+    needs_question: bool = Field(description="분해 가능한 일정이지만 좋은 task 목록을 만들 맥락이 부족해 추가 질문이 필요한지 여부")
     question: str = Field(default="", description="추가 질문")
     detail_with_context: str = Field(description="누적된 일정 상세 컨텍스트")
 
@@ -57,10 +58,10 @@ class AgentState(TypedDict, total=False):
     plan_retry: int
     max_retry: int
 
+    is_decomposable: bool
     needs_question: bool
     question: str
     question_source: Literal["", "classification", "pre_validate"]
-    pre_validation_question: str
     is_valid: bool
     invalid_reason: str
 
@@ -82,12 +83,12 @@ class ScheduleTaskRequest(BaseModel):
     start_time: str = Field(default="", max_length=200)
     end_time: str = Field(default="", max_length=200)
     existing_schedules: list[dict] = Field(default_factory=list)
+    question: str = Field(default="", max_length=4000)
     classification_retry: int = Field(default=0, ge=0)
     pre_validation_retry: int = Field(default=0, ge=0)
     plan_retry: int = Field(default=0, ge=0)
     max_retry: int = Field(default=2, ge=0, le=5)
     question_source: Literal["", "classification", "pre_validate"] = ""
-    pre_validation_question: str = Field(default="", max_length=4000)
 
 
 class ScheduleTaskResponse(BaseModel):
@@ -99,12 +100,12 @@ class ScheduleTaskResponse(BaseModel):
     end_time: str = ""
     normalized_schedule: dict = Field(default_factory=dict)
     tasks: list[dict] = Field(default_factory=list)
+    is_decomposable: bool = True
     question: str = ""
     classification_retry: int = 0
     pre_validation_retry: int = 0
     plan_retry: int = 0
     question_source: Literal["", "classification", "pre_validate"] = ""
-    pre_validation_question: str = ""
     fallback_reason: str = ""
     answer: str = ""
 

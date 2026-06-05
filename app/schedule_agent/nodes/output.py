@@ -6,6 +6,12 @@ def build_output(state: AgentState) -> dict:
     title = state.get("title", "")
     detail_with_context = state.get("detail_with_context") or state.get("detail", "")
     tasks = state.get("tasks", [])
+    is_decomposable = state.get("is_decomposable", True)
+    answer = (
+        f"{title} 일정을 {len(tasks)}개의 하위 task로 분해했습니다."
+        if is_decomposable
+        else f"{title} 일정은 단일 작업으로 충분해 하위 task로 분해하지 않았습니다."
+    )
 
     return {
         "status": "ok",
@@ -14,6 +20,7 @@ def build_output(state: AgentState) -> dict:
         "location": state.get("location", ""),
         "start_time": state.get("start_time", ""),
         "end_time": state.get("end_time", ""),
-        "tasks": tasks,
-        "answer": f"{title} 일정을 {len(tasks)}개의 하위 task로 분해했습니다.",
+        "tasks": tasks if is_decomposable else [],
+        "is_decomposable": is_decomposable,
+        "answer": answer,
     }
