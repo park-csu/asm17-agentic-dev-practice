@@ -116,7 +116,12 @@ def parse_datetime(value: str) -> Optional[datetime]:
             return None
 
 
-async def get_overlapping_schedules(session: AsyncSession, start_time: str, end_time: str) -> list[dict]:
+async def get_overlapping_schedules(
+    session: AsyncSession,
+    start_time: str,
+    end_time: str,
+    exclude_schedule_id: UUID | None = None,
+) -> list[dict]:
     """저장된 ok 상태 일정 중 시간이 겹치는 것만 반환한다."""
     start_at = parse_datetime(start_time)
     end_at = parse_datetime(end_time)
@@ -127,6 +132,8 @@ async def get_overlapping_schedules(session: AsyncSession, start_time: str, end_
         Schedule.start_time < end_at,
         Schedule.end_time > start_at,
     )
+    if exclude_schedule_id is not None:
+        stmt = stmt.where(Schedule.id != exclude_schedule_id)
     results = await session.exec(stmt)
     return [
         {
@@ -498,6 +505,7 @@ async def regenerate_schedule_stream(
         session,
         schedule.start_time.isoformat() if schedule.start_time else "",
         schedule.end_time.isoformat() if schedule.end_time else "",
+        exclude_schedule_id=schedule_id,
     )
     create_req = CreateScheduleRequest(
         title=schedule.title,
