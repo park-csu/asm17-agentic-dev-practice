@@ -56,3 +56,22 @@
 - `fetch`를 mock해 URL, method, headers, body shape를 검증한다.
 - 실제 백엔드 응답 확인은 `npm run test:api`로 분리한다.
 - 실제 API 테스트는 현재 비파괴 `GET` 요청만 검증한다.
+
+## ADR-007: FullCalendar 앱 셸은 mock data로 먼저 구성한다
+
+실제 CRUD/SSE 연결은 사용자 데이터 변경과 LLM 실행을 동반한다. MVP 화면 구조와 캘린더 상호작용을 먼저 안정화하기 위해, 첫 UI 구현은 mock data 기반으로 진행한다.
+
+결정:
+- FullCalendar를 캘린더 렌더링과 월/주/일/목록 전환의 기준으로 사용한다.
+- `src/calendar/mockData.ts`에 일정과 task 샘플을 둔다.
+- `src/calendar/model.ts`에 선택 일정 계산과 날짜별 task 그룹핑 로직을 둔다.
+- 실제 API 연결은 다음 커밋에서 API 클라이언트를 주입하는 방식으로 진행한다.
+
+## ADR-008: 일정 항목 액션 아이콘은 Font Awesome 웹폰트를 사용한다
+
+왼쪽 일정 목록은 조밀한 업무 도구 UI로 유지한다. 텍스트 버튼은 항목 높이와 정보 밀도를 늘리므로, 수정/삭제 액션은 Font Awesome 아이콘으로 표현한다.
+
+결정:
+- React 아이콘 패키지를 앱 번들에 포함하지 않고 Font Awesome CSS 웹폰트를 로드한다.
+- 일정 항목 클릭은 선택만 수행한다.
+- 수정/삭제 아이콘은 일정 항목 오른쪽 위에 배치한다.
