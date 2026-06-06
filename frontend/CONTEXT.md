@@ -25,10 +25,12 @@
 
 ## 현재 구현 단계
 
-현재 프론트 UI는 `src/calendar/mockData.ts`의 mock 일정으로 FullCalendar 기반 3열 앱 셸을 먼저 구성한다.
+현재 프론트 UI는 실제 백엔드 API를 사용한다.
 
-- 이 단계에서는 실제 일정 생성/수정/삭제 API를 호출하지 않는다.
-- API 클라이언트는 `src/api`에 유지하고, 다음 단계에서 mock data를 실제 조회/변경 흐름으로 교체한다.
+- 앱 진입 시 `GET /api/v1/schedules`로 저장된 일정을 조회한다.
+- 새 일정 추가는 `POST /api/v1/schedules/stream`을 호출하고, 완료 후 상세 조회로 저장된 상태와 task를 반영한다.
+- 기존 일정 수정/삭제/task 재생성/task 완료 체크는 각각 백엔드 API를 호출한다.
+- `src/calendar/mockData.ts`는 이전 UI 단계의 샘플 데이터로 남아 있으며 앱 진입 경로에서는 사용하지 않는다.
 - UI 전용 타입과 모델 함수는 `src/calendar`가 소유한다.
 
 ## 선택 상태

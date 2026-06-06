@@ -26,6 +26,11 @@ button {
   font: inherit;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 input,
 textarea {
   width: 100%;
@@ -57,10 +62,52 @@ label {
 
 .app-shell {
   display: grid;
+  position: relative;
   grid-template-columns: 280px minmax(560px, 1fr) 360px;
   min-height: 100vh;
   background: #010102;
   color: #f7f8f8;
+}
+
+.app-toast {
+  position: fixed;
+  z-index: 30;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  max-width: min(360px, calc(100vw - 28px));
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #34343a;
+  border-radius: 8px;
+  padding: 10px 10px 10px 12px;
+  color: #f7f8f8;
+  background: #202124;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.38);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.app-toast.danger {
+  border-color: #eb5757;
+}
+
+.app-toast span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-toast button {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #34343a;
+  border-radius: 6px;
+  color: #d0d6e0;
+  background: #141516;
+  cursor: pointer;
 }
 
 .schedule-sidebar,
@@ -150,6 +197,10 @@ h2 {
 .schedule-list-item.selected {
   border-color: #34343a;
   background: #18191a;
+}
+
+.schedule-list-item.failed {
+  border-color: rgba(235, 87, 87, 0.62);
 }
 
 .schedule-list-item.selected {
@@ -667,6 +718,26 @@ h2 {
   gap: 8px;
 }
 
+.clarification-panel {
+  display: grid;
+  gap: 10px;
+  margin: 12px 12px 0;
+  border: 1px solid #f2994a;
+  border-radius: 8px;
+  padding: 12px;
+  background: #18191a;
+}
+
+.clarification-panel strong {
+  color: #f7f8f8;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.clarification-panel textarea {
+  min-height: 84px;
+}
+
 .task-date-header {
   display: flex;
   align-items: center;
@@ -730,6 +801,28 @@ h2 {
   gap: 8px;
   border-top: 1px solid #23252a;
   padding-top: 7px;
+}
+
+.task-check {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #f7f8f8;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.task-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: #5e6ad2;
+}
+
+.task-check input:checked + span {
+  color: #8a8f98;
+  text-decoration: line-through;
 }
 
 .task-list small {

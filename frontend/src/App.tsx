@@ -4,9 +4,19 @@ import interactionPlugin, { DateClickArg } from "@fullcalendar/interaction";
 import listPlugin from "@fullcalendar/list";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import { EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { mockSchedules } from "./calendar/mockData";
+import {
+  deleteSchedule,
+  fetchSchedule,
+  fetchSchedules,
+  streamCreateSchedule,
+  streamRegenerateSchedule,
+  updateSchedule,
+  updateTaskDone,
+} from "./api/client";
+import type { StreamDoneData } from "./api/types";
+import { apiScheduleToCalendarSchedule, apiSchedulesToCalendarSchedules } from "./calendar/apiAdapter";
 import { buildTaskGroups, findClosestScheduleId, formatDateLabel, formatTimeRange } from "./calendar/model";
 import type { CalendarSchedule, ScheduleStatus } from "./calendar/types";
 
@@ -23,6 +33,11 @@ type ScheduleFormState = {
   location: string;
   start_time: string;
   end_time: string;
+};
+
+type Notice = {
+  tone: "info" | "danger";
+  message: string;
 };
 
 const emptyForm: ScheduleFormState = {
@@ -96,16 +111,73 @@ function scheduleToForm(schedule: CalendarSchedule): ScheduleFormState {
   };
 }
 
+function buildContinuationPayload(doneData: StreamDoneData, contextAnswer: string) {
+  return {
+    context_answer: contextAnswer,
+    question: doneData.question,
+    question_source: doneData.question_source,
+    classification_retry: doneData.classification_retry,
+    pre_validation_retry: doneData.pre_validation_retry,
+    plan_retry: doneData.plan_retry,
+    detail_with_context: doneData.detail_with_context,
+  };
+}
+
 export default function App() {
-  const [schedules, setSchedules] = useState<CalendarSchedule[]>(mockSchedules);
-  const [selectedScheduleId, setSelectedScheduleId] = useState(() => findClosestScheduleId(mockSchedules));
+  const [schedules, setSchedules] = useState<CalendarSchedule[]>([]);
+  const [selectedScheduleId, setSelectedScheduleId] = useState("");
   const [newScheduleForm, setNewScheduleForm] = useState<ScheduleFormState | null>(null);
   const [detailScheduleId, setDetailScheduleId] = useState("");
   const [detailForm, setDetailForm] = useState<ScheduleFormState>(emptyForm);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [loadingScheduleId, setLoadingScheduleId] = useState("");
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [streamContextByScheduleId, setStreamContextByScheduleId] = useState<Record<string, StreamDoneData>>({});
+  const [contextAnswer, setContextAnswer] = useState("");
 
   const selectedSchedule = schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null;
   const calendarEvents = useMemo(() => toCalendarEvents(schedules, selectedScheduleId), [schedules, selectedScheduleId]);
   const taskGroups = useMemo(() => buildTaskGroups(schedules), [schedules]);
+  const selectedContinuation = selectedSchedule ? streamContextByScheduleId[selectedSchedule.id] : undefined;
+  const canAnswerQuestion =
+    selectedSchedule?.status === "needs_question" && selectedContinuation && selectedContinuation.question.trim().length > 0;
+
+  useEffect(() => {
+    void loadSchedules();
+  }, []);
+
+  async function loadSchedules() {
+    setIsInitialLoading(true);
+    try {
+      const apiSchedules = await fetchSchedules();
+      const nextSchedules = apiSchedulesToCalendarSchedules(apiSchedules);
+      setSchedules(nextSchedules);
+      setSelectedScheduleId((current) => {
+        if (current && nextSchedules.some((schedule) => schedule.id === current)) {
+          return current;
+        }
+        return findClosestScheduleId(nextSchedules);
+      });
+      setNotice(null);
+    } catch (error) {
+      setNotice({ tone: "danger", message: getErrorMessage(error, "일정 목록을 불러오지 못했습니다.") });
+    } finally {
+      setIsInitialLoading(false);
+    }
+  }
+
+  async function refreshSchedule(scheduleId: string) {
+    const apiSchedule = await fetchSchedule(scheduleId);
+    const nextSchedule = apiScheduleToCalendarSchedule(apiSchedule);
+    setSchedules((current) => {
+      const exists = current.some((schedule) => schedule.id === scheduleId);
+      if (!exists) {
+        return [...current, nextSchedule];
+      }
+      return current.map((schedule) => (schedule.id === scheduleId ? nextSchedule : schedule));
+    });
+    return nextSchedule;
+  }
 
   function handleEventClick(info: EventClickArg) {
     setSelectedScheduleId(info.event.id);
@@ -148,62 +220,188 @@ export default function App() {
     setDetailForm(emptyForm);
   }
 
-  function submitNewSchedule(event: FormEvent<HTMLFormElement>) {
+  async function submitNewSchedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!newScheduleForm) {
       return;
     }
 
-    const schedule: CalendarSchedule = {
-      id: `mock-${crypto.randomUUID()}`,
+    const payload = {
       title: newScheduleForm.title.trim() || "제목 없는 일정",
       detail: newScheduleForm.detail,
       location: newScheduleForm.location,
       start_time: newScheduleForm.start_time,
       end_time: newScheduleForm.end_time,
-      status: "pending",
-      tasks: [],
     };
 
-    setSchedules((current) => [...current, schedule]);
-    setSelectedScheduleId(schedule.id);
     setNewScheduleForm(null);
+    setLoadingScheduleId("new");
+    setNotice({ tone: "info", message: "새 일정 생성 중" });
+
+    try {
+      const doneData = await streamCreateSchedule(payload);
+      const schedule = await refreshSchedule(doneData.schedule_id);
+      setSelectedScheduleId(schedule.id);
+      rememberContinuation(doneData);
+      setNotice({ tone: "info", message: "일정 생성이 완료되었습니다." });
+    } catch (error) {
+      setNotice({ tone: "danger", message: getErrorMessage(error, "일정 생성에 실패했습니다.") });
+      await loadSchedules();
+    } finally {
+      setLoadingScheduleId("");
+    }
   }
 
-  function submitDetail(event: FormEvent<HTMLFormElement>) {
+  async function submitDetail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!detailScheduleId) {
+      return;
+    }
+
+    setLoadingScheduleId(detailScheduleId);
+    try {
+      const apiSchedule = await updateSchedule(detailScheduleId, {
+        title: detailForm.title.trim() || "제목 없는 일정",
+        detail: detailForm.detail,
+        location: detailForm.location,
+      });
+      const nextSchedule = apiScheduleToCalendarSchedule(apiSchedule);
+      setSchedules((current) => current.map((schedule) => (schedule.id === detailScheduleId ? nextSchedule : schedule)));
+      setNotice({ tone: "info", message: "일정을 저장했습니다." });
+      closeDetail();
+    } catch (error) {
+      setNotice({ tone: "danger", message: getErrorMessage(error, "일정 저장에 실패했습니다.") });
+    } finally {
+      setLoadingScheduleId("");
+    }
+  }
+
+  async function deleteDetailSchedule() {
+    await deleteScheduleById(detailScheduleId);
+    closeDetail();
+  }
+
+  async function deleteScheduleById(scheduleId: string) {
+    if (!scheduleId) {
+      return;
+    }
+
+    setLoadingScheduleId(scheduleId);
+    try {
+      await deleteSchedule(scheduleId);
+      setSchedules((current) => current.filter((schedule) => schedule.id !== scheduleId));
+      setStreamContextByScheduleId((current) => {
+        const next = { ...current };
+        delete next[scheduleId];
+        return next;
+      });
+      if (selectedScheduleId === scheduleId) {
+        setSelectedScheduleId("");
+      }
+      if (detailScheduleId === scheduleId) {
+        closeDetail();
+      }
+      setNotice({ tone: "info", message: "일정을 삭제했습니다." });
+    } catch (error) {
+      setNotice({ tone: "danger", message: getErrorMessage(error, "일정 삭제에 실패했습니다.") });
+    } finally {
+      setLoadingScheduleId("");
+    }
+  }
+
+  async function regenerateScheduleById(scheduleId: string, payload?: ReturnType<typeof buildContinuationPayload>) {
+    if (!scheduleId) {
+      return;
+    }
+
+    closeDetail();
+    setLoadingScheduleId(scheduleId);
+    setNotice({ tone: "info", message: "task 재생성 중" });
+
+    try {
+      const doneData = await streamRegenerateSchedule(scheduleId, payload);
+      await refreshSchedule(scheduleId);
+      rememberContinuation(doneData);
+      setSelectedScheduleId(scheduleId);
+      setContextAnswer("");
+      setNotice({ tone: "info", message: "task 재생성이 완료되었습니다." });
+    } catch (error) {
+      setNotice({ tone: "danger", message: getErrorMessage(error, "task 재생성에 실패했습니다.") });
+    } finally {
+      setLoadingScheduleId("");
+    }
+  }
+
+  async function submitContextAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedSchedule || !selectedContinuation || !contextAnswer.trim()) {
+      return;
+    }
+
+    await regenerateScheduleById(selectedSchedule.id, buildContinuationPayload(selectedContinuation, contextAnswer.trim()));
+  }
+
+  async function toggleTask(scheduleId: string, taskId: string, isDone: boolean) {
     setSchedules((current) =>
       current.map((schedule) =>
-        schedule.id === detailScheduleId
+        schedule.id === scheduleId
           ? {
               ...schedule,
-              title: detailForm.title.trim() || "제목 없는 일정",
-              detail: detailForm.detail,
-              location: detailForm.location,
+              tasks: schedule.tasks.map((task) => (task.id === taskId ? { ...task, is_done: isDone } : task)),
             }
           : schedule,
       ),
     );
-    closeDetail();
+
+    try {
+      const apiTask = await updateTaskDone(scheduleId, taskId, isDone);
+      setSchedules((current) =>
+        current.map((schedule) =>
+          schedule.id === scheduleId
+            ? {
+                ...schedule,
+                tasks: schedule.tasks.map((task) => (task.id === taskId ? { ...task, ...apiTask } : task)),
+              }
+            : schedule,
+        ),
+      );
+    } catch (error) {
+      setSchedules((current) =>
+        current.map((schedule) =>
+          schedule.id === scheduleId
+            ? {
+                ...schedule,
+                tasks: schedule.tasks.map((task) => (task.id === taskId ? { ...task, is_done: !isDone } : task)),
+              }
+            : schedule,
+        ),
+      );
+      setNotice({ tone: "danger", message: getErrorMessage(error, "task 상태 저장에 실패했습니다.") });
+    }
   }
 
-  function deleteDetailSchedule() {
-    deleteScheduleById(detailScheduleId);
-    closeDetail();
-  }
-
-  function deleteScheduleById(scheduleId: string) {
-    setSchedules((current) => current.filter((schedule) => schedule.id !== scheduleId));
-    if (selectedScheduleId === scheduleId) {
-      setSelectedScheduleId("");
-    }
-    if (detailScheduleId === scheduleId) {
-      closeDetail();
-    }
+  function rememberContinuation(doneData: StreamDoneData) {
+    setStreamContextByScheduleId((current) => {
+      if (doneData.status !== "needs_question") {
+        const next = { ...current };
+        delete next[doneData.schedule_id];
+        return next;
+      }
+      return { ...current, [doneData.schedule_id]: doneData };
+    });
   }
 
   return (
     <main className="app-shell">
+      {notice && (
+        <div className={`app-toast ${notice.tone}`} role="status">
+          <span>{notice.message}</span>
+          <button type="button" aria-label="알림 닫기" onClick={() => setNotice(null)}>
+            <i className="fa-solid fa-xmark" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       <aside className="schedule-sidebar" aria-label="일정 목록">
         <header className="sidebar-header">
           <div>
@@ -215,13 +413,22 @@ export default function App() {
           </button>
         </header>
 
+        {(isInitialLoading || loadingScheduleId === "new") && (
+          <div className="inline-notice">
+            <strong>{isInitialLoading ? "불러오는 중" : "생성 중"}</strong>
+          </div>
+        )}
+
         <div className="schedule-list">
-          {schedules.length === 0 && <p className="empty-text">일정 없음</p>}
+          {!isInitialLoading && schedules.length === 0 && <p className="empty-text">일정 없음</p>}
           {schedules.map((schedule) => (
             <button
               key={schedule.id}
-              className={`schedule-list-item ${schedule.id === selectedScheduleId ? "selected" : ""}`}
+              className={`schedule-list-item ${schedule.id === selectedScheduleId ? "selected" : ""} ${
+                schedule.status === "fallback" ? "failed" : ""
+              }`}
               type="button"
+              disabled={loadingScheduleId === schedule.id}
               onClick={() => setSelectedScheduleId(schedule.id)}
             >
               <span className="schedule-list-main">
@@ -229,7 +436,9 @@ export default function App() {
                 <span>{formatTimeRange(schedule.start_time, schedule.end_time)}</span>
                 <span>{schedule.location || "위치 없음"}</span>
               </span>
-              <span className={`status-pill status-${schedule.status}`}>{statusLabel[schedule.status]}</span>
+              <span className={`status-pill status-${schedule.status}`}>
+                {loadingScheduleId === schedule.id ? "생성 중" : statusLabel[schedule.status]}
+              </span>
               <span className="schedule-list-actions" aria-label={`${schedule.title} 작업`}>
                 <span
                   className="list-action-button"
@@ -259,13 +468,13 @@ export default function App() {
                   title="삭제"
                   onClick={(event) => {
                     event.stopPropagation();
-                    deleteScheduleById(schedule.id);
+                    void deleteScheduleById(schedule.id);
                   }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
                       event.stopPropagation();
-                      deleteScheduleById(schedule.id);
+                      void deleteScheduleById(schedule.id);
                     }
                   }}
                 >
@@ -333,6 +542,20 @@ export default function App() {
           <span>{taskGroups.reduce((sum, group) => sum + group.taskCount, 0)}개</span>
         </header>
 
+        {canAnswerQuestion && (
+          <form className="clarification-panel" onSubmit={submitContextAnswer}>
+            <strong>{selectedContinuation.question}</strong>
+            <textarea
+              value={contextAnswer}
+              placeholder="답변"
+              onChange={(event) => setContextAnswer(event.target.value)}
+            />
+            <button className="primary-button" type="submit" disabled={loadingScheduleId === selectedSchedule?.id}>
+              답변 제출
+            </button>
+          </form>
+        )}
+
         <div className="task-group-list">
           {taskGroups.length === 0 && <p className="empty-text">생성된 task 없음</p>}
           {taskGroups.map((group) => (
@@ -342,11 +565,18 @@ export default function App() {
                 <span>{group.taskCount}개</span>
               </header>
               {group.schedules.map((schedule) => (
-                <button
+                <div
                   key={schedule.id}
                   className={`task-schedule-block ${schedule.id === selectedScheduleId ? "selected" : ""}`}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setSelectedScheduleId(schedule.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedScheduleId(schedule.id);
+                    }
+                  }}
                 >
                   <div className="task-schedule-title">
                     <strong>{schedule.title}</strong>
@@ -358,13 +588,20 @@ export default function App() {
                     <ol className="task-list">
                       {schedule.tasks.map((task) => (
                         <li key={task.id}>
-                          <span>{task.title}</span>
+                          <label className="task-check" onClick={(event) => event.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={task.is_done}
+                              onChange={(event) => void toggleTask(schedule.id, task.id, event.target.checked)}
+                            />
+                            <span>{task.title}</span>
+                          </label>
                           <small>{task.estimated_minutes}분</small>
                         </li>
                       ))}
                     </ol>
                   )}
-                </button>
+                </div>
               ))}
             </section>
           ))}
@@ -386,7 +623,7 @@ export default function App() {
             <form className="modal-form" onSubmit={submitNewSchedule}>
               <ScheduleFields form={newScheduleForm} onChange={setNewScheduleForm} />
               <footer className="modal-actions">
-                <button className="primary-button" type="submit">
+                <button className="primary-button" type="submit" disabled={loadingScheduleId === "new"}>
                   일정 추가
                 </button>
               </footer>
@@ -410,14 +647,19 @@ export default function App() {
             <form className="modal-form" onSubmit={submitDetail}>
               <ScheduleFields form={detailForm} onChange={setDetailForm} readOnlyTime />
               <footer className="modal-actions split">
-                <button className="danger-button" type="button" onClick={deleteDetailSchedule}>
+                <button className="danger-button" type="button" onClick={() => void deleteDetailSchedule()}>
                   삭제
                 </button>
                 <div>
-                  <button className="ghost-button" type="button" disabled>
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    disabled={loadingScheduleId === detailScheduleId}
+                    onClick={() => void regenerateScheduleById(detailScheduleId)}
+                  >
                     task 재생성
                   </button>
-                  <button className="primary-button" type="submit">
+                  <button className="primary-button" type="submit" disabled={loadingScheduleId === detailScheduleId}>
                     저장
                   </button>
                 </div>
@@ -451,7 +693,7 @@ function ScheduleFields({
       </label>
       <label>
         상세 내용
-        <textarea value={form.detail} onChange={(event) => update("detail", event.target.value)} />
+        <textarea value={form.detail} required onChange={(event) => update("detail", event.target.value)} />
       </label>
       <label>
         위치
@@ -463,6 +705,7 @@ function ScheduleFields({
           <input
             type="datetime-local"
             value={form.start_time}
+            required
             readOnly={readOnlyTime}
             onChange={(event) => update("start_time", event.target.value)}
           />
@@ -472,6 +715,7 @@ function ScheduleFields({
           <input
             type="datetime-local"
             value={form.end_time}
+            required
             readOnly={readOnlyTime}
             onChange={(event) => update("end_time", event.target.value)}
           />
@@ -479,4 +723,8 @@ function ScheduleFields({
       </div>
     </>
   );
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
