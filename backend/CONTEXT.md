@@ -7,7 +7,8 @@
 ## 구조
 
 - `backend/main.py`: FastAPI 앱 진입점, CORS 미들웨어, lifespan(DB 초기화)
-- `backend/core/config.py`: `DATABASE_URL`, `CORS_ORIGINS` 환경변수
+- `backend/core/config.py`: `DATABASE_URL`, `CORS_ORIGINS`, `SUPABASE_URL` 환경변수
+- `backend/core/auth.py`: Supabase JWKS 기반 JWT 검증 미들웨어 (`get_current_user_id`)
 - `backend/db/models.py`: SQLModel 테이블 정의 (`User`, `Schedule`, `Task`)
 - `backend/db/session.py`: async 엔진, 세션 팩토리, `init_db`, `get_session`
 - `backend/api/__init__.py`: 라우터 등록
@@ -31,4 +32,5 @@
 - `existing_schedules`는 클라이언트가 넘기지 않고, 서버가 DB에서 시간 겹치는 일정을 직접 조회해 에이전트에 주입한다.
 - SSE `done` 이벤트 전에 DB 저장을 완료하여 `schedule_id`를 즉시 반환한다.
 - 에이전트 플로우는 `app/schedule_agent`가 소유하며, `backend`는 호출과 저장만 담당한다.
-- 인증, 캘린더 연동은 이 패키지의 현재 범위가 아니다.
+- 인증은 Supabase Auth + Google OAuth. 백엔드는 JWKS로 JWT를 검증하고 `user_id`로 데이터를 격리한다.
+- 캘린더 연동은 이 패키지의 현재 범위가 아니다.
