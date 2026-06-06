@@ -456,6 +456,9 @@ async def update_task(
     session: AsyncSession = Depends(get_session),
     user_id: UUID = Depends(get_current_user_id),
 ):
+    schedule = await session.get(Schedule, schedule_id)
+    if not schedule or schedule.user_id != user_id:
+        raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
     task = await session.get(Task, task_id)
     if not task or task.schedule_id != schedule_id:
         raise HTTPException(status_code=404, detail="태스크를 찾을 수 없습니다.")
