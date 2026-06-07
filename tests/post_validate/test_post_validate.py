@@ -109,6 +109,25 @@ class PostValidateTasksNodeTest(unittest.TestCase):
         self.assertEqual(len(result["tasks"]), 3)
         self.assertEqual(result["invalid_reason"], "")
 
+    def test_llm_valid_result_reindexes_order_index(self):
+        """LLM이 order_index를 덮어써도 검증 결과는 리스트 순서대로 1..n을 유지해야 한다."""
+        tasks = _make_task_dicts(3)
+        schedule_tasks = [
+            ScheduleTask(title="자료 조사", description="", estimated_minutes=30, order_index=1),
+            ScheduleTask(title="슬라이드 작성", description="", estimated_minutes=30, order_index=1),
+            ScheduleTask(title="리허설", description="", estimated_minutes=30, order_index=1),
+        ]
+        mock_result = PostValidationResult(
+            is_valid=True, tasks=schedule_tasks, invalid_reason=""
+        )
+
+        with patch("app.schedule_agent.nodes.post_validate.get_llm", _make_llm_mock(mock_result)):
+            result = post_validate_tasks(
+                {"tasks": tasks, "normalized_schedule": {"title": "발표 준비"}}
+            )
+
+        self.assertEqual([task["order_index"] for task in result["tasks"]], [1, 2, 3])
+
     def test_llm_invalid_result_propagates_reason(self):
         """LLM이 is_valid=False를 반환하면 invalid_reason이 결과에 포함되어야 한다."""
         tasks = _make_task_dicts(2)
