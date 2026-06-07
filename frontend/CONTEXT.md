@@ -6,6 +6,8 @@
 
 ## 책임
 
+- Supabase Auth Google OAuth로 로그인하고 access token을 보관한다.
+- 일정 API 요청에는 `Authorization: Bearer <access_token>` 헤더를 포함한다.
 - 저장된 일정 목록을 `GET /api/v1/schedules`로 조회한다.
 - 새 일정 추가 시 `POST /api/v1/schedules/stream`을 호출해 일정 저장과 task 생성을 동시에 실행한다.
 - 기존 일정의 task 재생성은 `POST /api/v1/schedules/{id}/stream`을 사용한다.
@@ -27,6 +29,7 @@
 
 현재 프론트 UI는 실제 백엔드 API를 사용한다.
 
+- 앱 진입 시 Supabase 세션을 확인하고, 로그인 전에는 일정 API를 호출하지 않는다.
 - 앱 진입 시 `GET /api/v1/schedules`로 저장된 일정을 조회한다.
 - 새 일정 추가는 `POST /api/v1/schedules/stream`을 호출하고, 완료 후 상세 조회로 저장된 상태와 task를 반영한다.
 - 기존 일정 수정/삭제/task 재생성/task 완료 체크는 각각 백엔드 API를 호출한다.
@@ -47,9 +50,14 @@
 
 프론트 내부 일정 타입은 API 응답 타입과 분리한다.
 
+- 인증 세션과 Supabase 클라이언트는 `src/auth/supabase.ts`가 소유한다.
 - API 타입은 `src/api/types.ts`에서 백엔드 응답/요청 계약을 표현한다.
 - UI 전용 타입은 이후 캘린더 구현에서 별도로 둔다.
 - 현재 백엔드는 겹치는 기존 일정을 서버 DB에서 조회하므로, 프론트 요청 body에 `existing_schedules`를 포함하지 않는다.
+
+## 인증 환경변수
+
+프론트 로컬 실행에는 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`가 필요하다. Docker Compose 실행 시에는 루트 `.env`의 `SUPABASE_URL`, `SUPABASE_ANON_KEY`를 프론트 컨테이너의 `VITE_*` 환경변수로 전달한다.
 
 ## 테스트
 

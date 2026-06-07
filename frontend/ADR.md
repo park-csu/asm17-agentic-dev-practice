@@ -85,3 +85,14 @@ mock UI 단계 이후 실제 CRUD/SSE를 연결할 때, stream 응답의 `done` 
 - 새 일정 생성과 task 재생성은 SSE 완료 후 `GET /api/v1/schedules/{id}`를 호출한다.
 - task 완료 체크는 낙관적으로 반영하되 실패하면 이전 체크 상태로 롤백한다.
 - 새 일정 생성 중에는 모달을 닫고 사이드바/알림에 생성 중 상태를 표시한다.
+
+## ADR-010: Supabase Google OAuth 세션으로 API 인증을 처리한다
+
+백엔드 일정 API는 Supabase JWT를 검증하고 `sub`를 `user_id`로 사용한다. 프론트가 인증 없이 API를 호출하면 모든 일정 엔드포인트가 401을 반환한다.
+
+결정:
+- 프론트는 `@supabase/supabase-js`로 Google OAuth 로그인을 수행한다.
+- 로그인 전에는 일정 API를 호출하지 않는다.
+- Supabase 세션의 `access_token`을 모든 일정 CRUD/SSE 요청의 `Authorization: Bearer <token>` 헤더에 포함한다.
+- Supabase 클라이언트 생성과 로그인/로그아웃 함수는 `src/auth/supabase.ts`가 소유한다.
+- 로컬 Docker Compose는 루트 `.env`의 `SUPABASE_URL`, `SUPABASE_ANON_KEY`를 프론트 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`로 전달한다.

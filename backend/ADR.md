@@ -34,9 +34,10 @@ Accepted
 **인증: Supabase Auth + Google OAuth**
 - 프론트엔드에서 Supabase Auth로 Google OAuth 로그인 후 JWT 발급.
 - 백엔드는 JWT를 `PyJWT` + JWKS(`/auth/v1/.well-known/jwks.json`)로 검증한다.
-- HS256/RS256 모두 지원하며, Supabase 키 교체 시 자동으로 갱신된다.
+- HS256/RS256/ES256을 지원하며, Supabase 키 교체 시 자동으로 갱신된다.
 - JWT의 `sub` 클레임을 `user_id`로 사용해 일정 데이터를 사용자별로 격리한다.
 - `SUPABASE_JWT_SECRET`(HS256 직접 검증) 방식 대신 JWKS 방식을 채택해 키 관리 부담을 없앤다.
+- 일정 생성 시 `users` row가 아직 없으면 `sub` 기반 placeholder 사용자 row를 생성해 `schedules.user_id` 외래키를 만족시킨다.
 
 **배포**
 - FastAPI: Railway (`railway.toml` + `Dockerfile.api`)

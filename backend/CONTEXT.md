@@ -33,4 +33,5 @@
 - SSE `done` 이벤트 전에 DB 저장을 완료하여 `schedule_id`를 즉시 반환한다.
 - 에이전트 플로우는 `app/schedule_agent`가 소유하며, `backend`는 호출과 저장만 담당한다.
 - 인증은 Supabase Auth + Google OAuth. 백엔드는 JWKS로 JWT를 검증하고 `user_id`로 데이터를 격리한다.
+- 일정 생성 시 Supabase JWT의 `sub`에 해당하는 `users` row가 없으면 개발/초기 가입 흐름을 위해 placeholder 사용자 row를 생성한다.
 - 캘린더 연동은 이 패키지의 현재 범위가 아니다.
