@@ -7,7 +7,7 @@ from typing_extensions import TypedDict
 class ScheduleTask(BaseModel):
     title: str = Field(description="실행할 작업명")
     description: str = Field(default="", description="작업 설명")
-    estimated_minutes: int = Field(default=30, ge=1, description="예상 소요 시간")
+    estimated_minutes: int = Field(ge=1, description="이 작업의 예상 소요 시간(분). 작업마다 분량·난이도가 다르므로 서로 다른 값을 매길 것. 예: 간단한 정리·확인 10, 본격 조리·작업 60. 모든 작업에 같은 값을 쓰지 말 것.")
     order_index: int = Field(default=1, ge=1, description="실행 순서")
 
 

@@ -33,8 +33,13 @@ def post_validate_tasks(state: AgentState) -> dict:
             ]
         )
         result_dict = result.model_dump()
-        result_dict["tasks"] = _reindex_tasks(result_dict.get("tasks", []))
-        return result_dict
+        # post_validate는 유효성만 판단한다. task 내용/시간은 plan이 만든 원본(tasks)을 유지해,
+        # 검증 LLM의 재출력이 estimated_minutes를 기본값(30)으로 덮어쓰는 것을 막는다.
+        return {
+            "is_valid": result_dict["is_valid"],
+            "tasks": _reindex_tasks(tasks),
+            "invalid_reason": result_dict.get("invalid_reason", ""),
+        }
     except Exception as e:
         logger.warning("Task post-validation failed: %s", e)
         return {"is_valid": True, "tasks": _reindex_tasks(tasks), "invalid_reason": ""}
