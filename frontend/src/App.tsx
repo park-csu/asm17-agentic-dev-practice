@@ -4,6 +4,7 @@ import interactionPlugin, { DateClickArg } from "@fullcalendar/interaction";
 import listPlugin from "@fullcalendar/list";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import { EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
+import type { Session } from "@supabase/supabase-js";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
@@ -15,7 +16,8 @@ import {
   updateSchedule,
   updateTaskDone,
 } from "./api/client";
-import type { StreamDoneData } from "./api/types";
+import type { AgentNodeName, StreamDoneData, StreamEvent } from "./api/types";
+import { isSupabaseConfigured, signInWithGoogle, signOut, supabase } from "./auth/supabase";
 import { apiScheduleToCalendarSchedule, apiSchedulesToCalendarSchedules } from "./calendar/apiAdapter";
 import { buildTaskGroups, findClosestScheduleId, formatDateLabel, formatTimeRange } from "./calendar/model";
 import type { CalendarSchedule, ScheduleStatus } from "./calendar/types";
@@ -25,6 +27,16 @@ const statusLabel: Record<ScheduleStatus, string> = {
   needs_question: "needs_question",
   fallback: "fallback",
   pending: "대기",
+};
+
+const streamNodeLabel: Partial<Record<AgentNodeName | string, string>> = {
+  pre_validate: "일정 유효성 검증",
+  classification: "분해 필요성 판단",
+  ask_context: "추가 맥락 반영",
+  plan: "task 생성",
+  post_validate: "task 검증",
+  output: "결과 정리",
+  fallback: "대체 응답 생성",
 };
 
 type ScheduleFormState = {
@@ -63,17 +75,21 @@ function toCalendarEvents(schedules: CalendarSchedule[], selectedScheduleId: str
     extendedProps: {
       status: schedule.status,
       location: schedule.location,
+      fallbackReason: schedule.fallback_reason,
     },
   }));
 }
 
 function renderEventContent(info: EventContentArg) {
   const status = info.event.extendedProps.status as ScheduleStatus;
+  const fallbackReason = String(info.event.extendedProps.fallbackReason ?? "");
+  const title = status === "fallback" ? getFallbackReason(fallbackReason) : undefined;
   return (
-    <div className="calendar-event-content">
+    <div className="calendar-event-content" title={title}>
       <span className={`calendar-event-status status-${status}`} aria-hidden="true" />
       <span className="calendar-event-time">{info.timeText}</span>
       <span className="calendar-event-title">{info.event.title}</span>
+      {status === "fallback" && <span className="calendar-event-reason">{getFallbackReason(fallbackReason)}</span>}
     </div>
   );
 }
@@ -123,6 +139,14 @@ function buildContinuationPayload(doneData: StreamDoneData, contextAnswer: strin
   };
 }
 
+function getFallbackReason(reason: string): string {
+  return reason.trim() || "task 생성에 실패했습니다.";
+}
+
+function createTemporaryScheduleId(): string {
+  return `temp-schedule-${crypto.randomUUID()}`;
+}
+
 export default function App() {
   const [schedules, setSchedules] = useState<CalendarSchedule[]>([]);
   const [selectedScheduleId, setSelectedScheduleId] = useState("");
@@ -131,10 +155,17 @@ export default function App() {
   const [detailForm, setDetailForm] = useState<ScheduleFormState>(emptyForm);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [loadingScheduleId, setLoadingScheduleId] = useState("");
+  const [streamProgress, setStreamProgress] = useState("");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [streamContextByScheduleId, setStreamContextByScheduleId] = useState<Record<string, StreamDoneData>>({});
   const [contextAnswer, setContextAnswer] = useState("");
+  const [authSession, setAuthSession] = useState<Session | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [authError, setAuthError] = useState("");
 
+  const accessToken = authSession?.access_token ?? "";
+  const isCreatingNewSchedule = loadingScheduleId.startsWith("temp-schedule-");
   const selectedSchedule = schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null;
   const calendarEvents = useMemo(() => toCalendarEvents(schedules, selectedScheduleId), [schedules, selectedScheduleId]);
   const taskGroups = useMemo(() => buildTaskGroups(schedules), [schedules]);
@@ -143,13 +174,60 @@ export default function App() {
     selectedSchedule?.status === "needs_question" && selectedContinuation && selectedContinuation.question.trim().length > 0;
 
   useEffect(() => {
-    void loadSchedules();
+    if (!supabase) {
+      setIsAuthLoading(false);
+      setIsInitialLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (!isMounted) {
+        return;
+      }
+      if (error) {
+        setAuthError(error.message);
+      }
+      setAuthSession(data.session);
+      setIsAuthLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthSession(session);
+      setAuthError("");
+      setIsAuthLoading(false);
+      if (!session) {
+        setSchedules([]);
+        setSelectedScheduleId("");
+        setStreamContextByScheduleId({});
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  async function loadSchedules() {
+  useEffect(() => {
+    if (isAuthLoading) {
+      return;
+    }
+    if (!isSupabaseConfigured || !accessToken) {
+      setSchedules([]);
+      setSelectedScheduleId("");
+      setIsInitialLoading(false);
+      return;
+    }
+    void loadSchedules(accessToken);
+  }, [accessToken, isAuthLoading]);
+
+  async function loadSchedules(token = accessToken) {
     setIsInitialLoading(true);
     try {
-      const apiSchedules = await fetchSchedules();
+      const apiSchedules = await fetchSchedules({ accessToken: token });
       const nextSchedules = apiSchedulesToCalendarSchedules(apiSchedules);
       setSchedules(nextSchedules);
       setSelectedScheduleId((current) => {
@@ -167,7 +245,7 @@ export default function App() {
   }
 
   async function refreshSchedule(scheduleId: string) {
-    const apiSchedule = await fetchSchedule(scheduleId);
+    const apiSchedule = await fetchSchedule(scheduleId, { accessToken });
     const nextSchedule = apiScheduleToCalendarSchedule(apiSchedule);
     setSchedules((current) => {
       const exists = current.some((schedule) => schedule.id === scheduleId);
@@ -234,13 +312,38 @@ export default function App() {
       end_time: newScheduleForm.end_time,
     };
 
+    const temporaryScheduleId = createTemporaryScheduleId();
+    const temporarySchedule: CalendarSchedule = {
+      id: temporaryScheduleId,
+      title: payload.title,
+      detail: payload.detail,
+      location: payload.location,
+      start_time: payload.start_time,
+      end_time: payload.end_time,
+      status: "pending",
+      fallback_reason: "",
+      tasks: [],
+    };
+
     setNewScheduleForm(null);
-    setLoadingScheduleId("new");
-    setNotice({ tone: "info", message: "새 일정 생성 중" });
+    setSchedules((current) => [temporarySchedule, ...current]);
+    setSelectedScheduleId(temporaryScheduleId);
+    setLoadingScheduleId(temporaryScheduleId);
+    setStreamProgress("에이전트 실행 중");
+    setNotice({ tone: "info", message: "새 일정 생성 중: 에이전트 실행 중" });
 
     try {
-      const doneData = await streamCreateSchedule(payload);
-      const schedule = await refreshSchedule(doneData.schedule_id);
+      const doneData = await streamCreateSchedule(payload, { accessToken, onEvent: handleStreamEvent });
+      const apiSchedule = await fetchSchedule(doneData.schedule_id, { accessToken });
+      const schedule = apiScheduleToCalendarSchedule(apiSchedule);
+      setSchedules((current) => {
+        const withoutDuplicate = current.filter((item) => item.id !== doneData.schedule_id);
+        const replaced = withoutDuplicate.map((item) => (item.id === temporaryScheduleId ? schedule : item));
+        if (replaced.some((item) => item.id === schedule.id)) {
+          return replaced;
+        }
+        return [schedule, ...replaced.filter((item) => item.id !== temporaryScheduleId)];
+      });
       setSelectedScheduleId(schedule.id);
       rememberContinuation(doneData);
       setNotice({ tone: "info", message: "일정 생성이 완료되었습니다." });
@@ -249,6 +352,7 @@ export default function App() {
       await loadSchedules();
     } finally {
       setLoadingScheduleId("");
+      setStreamProgress("");
     }
   }
 
@@ -260,11 +364,15 @@ export default function App() {
 
     setLoadingScheduleId(detailScheduleId);
     try {
-      const apiSchedule = await updateSchedule(detailScheduleId, {
-        title: detailForm.title.trim() || "제목 없는 일정",
-        detail: detailForm.detail,
-        location: detailForm.location,
-      });
+      const apiSchedule = await updateSchedule(
+        detailScheduleId,
+        {
+          title: detailForm.title.trim() || "제목 없는 일정",
+          detail: detailForm.detail,
+          location: detailForm.location,
+        },
+        { accessToken },
+      );
       const nextSchedule = apiScheduleToCalendarSchedule(apiSchedule);
       setSchedules((current) => current.map((schedule) => (schedule.id === detailScheduleId ? nextSchedule : schedule)));
       setNotice({ tone: "info", message: "일정을 저장했습니다." });
@@ -288,7 +396,7 @@ export default function App() {
 
     setLoadingScheduleId(scheduleId);
     try {
-      await deleteSchedule(scheduleId);
+      await deleteSchedule(scheduleId, { accessToken });
       setSchedules((current) => current.filter((schedule) => schedule.id !== scheduleId));
       setStreamContextByScheduleId((current) => {
         const next = { ...current };
@@ -316,10 +424,11 @@ export default function App() {
 
     closeDetail();
     setLoadingScheduleId(scheduleId);
-    setNotice({ tone: "info", message: "task 재생성 중" });
+    setStreamProgress("에이전트 실행 중");
+    setNotice({ tone: "info", message: "task 재생성 중: 에이전트 실행 중" });
 
     try {
-      const doneData = await streamRegenerateSchedule(scheduleId, payload);
+      const doneData = await streamRegenerateSchedule(scheduleId, payload, { accessToken, onEvent: handleStreamEvent });
       await refreshSchedule(scheduleId);
       rememberContinuation(doneData);
       setSelectedScheduleId(scheduleId);
@@ -329,6 +438,7 @@ export default function App() {
       setNotice({ tone: "danger", message: getErrorMessage(error, "task 재생성에 실패했습니다.") });
     } finally {
       setLoadingScheduleId("");
+      setStreamProgress("");
     }
   }
 
@@ -354,7 +464,7 @@ export default function App() {
     );
 
     try {
-      const apiTask = await updateTaskDone(scheduleId, taskId, isDone);
+      const apiTask = await updateTaskDone(scheduleId, taskId, isDone, { accessToken });
       setSchedules((current) =>
         current.map((schedule) =>
           schedule.id === scheduleId
@@ -391,6 +501,60 @@ export default function App() {
     });
   }
 
+  function handleStreamEvent(event: StreamEvent) {
+    if (event.event === "node") {
+      const nodeName = event.node ?? "";
+      const label = streamNodeLabel[nodeName] ?? nodeName;
+      const message = label ? `${label} 완료` : "에이전트 실행 중";
+      setStreamProgress(message);
+      setNotice({ tone: "info", message: `에이전트 진행: ${message}` });
+      return;
+    }
+    if (event.event === "done") {
+      setStreamProgress("결과 저장 중");
+      setNotice({ tone: "info", message: "에이전트 결과 저장 중" });
+    }
+  }
+
+  async function handleGoogleLogin() {
+    setIsSigningIn(true);
+    setAuthError("");
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      setAuthError(getErrorMessage(error, "Google 로그인에 실패했습니다."));
+    } finally {
+      setIsSigningIn(false);
+    }
+  }
+
+  async function handleSignOut() {
+    try {
+      await signOut();
+      setNotice({ tone: "info", message: "로그아웃했습니다." });
+    } catch (error) {
+      setNotice({ tone: "danger", message: getErrorMessage(error, "로그아웃에 실패했습니다.") });
+    }
+  }
+
+  if (isAuthLoading || !authSession) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel" aria-labelledby="auth-title">
+          <p className="eyebrow">TaskPilot</p>
+          <h1 id="auth-title">{isAuthLoading ? "로그인 확인 중" : "로그인"}</h1>
+          {!isSupabaseConfigured && <p className="error-text">Supabase 환경변수가 필요합니다.</p>}
+          {authError && <p className="error-text">{authError}</p>}
+          {!isAuthLoading && isSupabaseConfigured && (
+            <button className="primary-button" type="button" disabled={isSigningIn} onClick={() => void handleGoogleLogin()}>
+              {isSigningIn ? "연결 중" : "Google로 로그인"}
+            </button>
+          )}
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
       {notice && (
@@ -413,9 +577,10 @@ export default function App() {
           </button>
         </header>
 
-        {(isInitialLoading || loadingScheduleId === "new") && (
+        {(isInitialLoading || isCreatingNewSchedule) && (
           <div className="inline-notice">
             <strong>{isInitialLoading ? "불러오는 중" : "생성 중"}</strong>
+            {streamProgress && <span>{streamProgress}</span>}
           </div>
         )}
 
@@ -436,9 +601,13 @@ export default function App() {
                 <span>{formatTimeRange(schedule.start_time, schedule.end_time)}</span>
                 <span>{schedule.location || "위치 없음"}</span>
               </span>
+              {schedule.status === "fallback" && (
+                <span className="fallback-reason">{getFallbackReason(schedule.fallback_reason)}</span>
+              )}
               <span className={`status-pill status-${schedule.status}`}>
                 {loadingScheduleId === schedule.id ? "생성 중" : statusLabel[schedule.status]}
               </span>
+              {loadingScheduleId === schedule.id && streamProgress && <span className="schedule-progress">{streamProgress}</span>}
               <span className="schedule-list-actions" aria-label={`${schedule.title} 작업`}>
                 <span
                   className="list-action-button"
@@ -492,12 +661,23 @@ export default function App() {
             <p className="eyebrow">Calendar</p>
             <h2>{selectedSchedule ? selectedSchedule.title : "선택된 일정 없음"}</h2>
           </div>
-          {selectedSchedule && (
-            <div className="selected-meta">
-              <span>{formatDateLabel(selectedSchedule.start_time)}</span>
-              <span>{formatTimeRange(selectedSchedule.start_time, selectedSchedule.end_time)}</span>
+          <div className="topbar-actions">
+            {selectedSchedule && (
+              <div className="selected-meta">
+                <span>{formatDateLabel(selectedSchedule.start_time)}</span>
+                <span>{formatTimeRange(selectedSchedule.start_time, selectedSchedule.end_time)}</span>
+                {selectedSchedule.status === "fallback" && (
+                  <span className="selected-fallback-reason">{getFallbackReason(selectedSchedule.fallback_reason)}</span>
+                )}
+              </div>
+            )}
+            <div className="account-box">
+              <span>{authSession.user.email ?? "로그인됨"}</span>
+              <button className="ghost-button" type="button" onClick={() => void handleSignOut()}>
+                로그아웃
+              </button>
             </div>
-          )}
+          </div>
         </header>
 
         <div className="calendar-surface">
@@ -582,6 +762,9 @@ export default function App() {
                     <strong>{schedule.title}</strong>
                     <span>{formatTimeRange(schedule.start_time, schedule.end_time)}</span>
                   </div>
+                  {schedule.status === "fallback" && (
+                    <p className="fallback-reason board">{getFallbackReason(schedule.fallback_reason)}</p>
+                  )}
                   {schedule.tasks.length === 0 ? (
                     <p className="empty-text">아직 생성된 task가 없습니다.</p>
                   ) : (
@@ -623,7 +806,7 @@ export default function App() {
             <form className="modal-form" onSubmit={submitNewSchedule}>
               <ScheduleFields form={newScheduleForm} onChange={setNewScheduleForm} />
               <footer className="modal-actions">
-                <button className="primary-button" type="submit" disabled={loadingScheduleId === "new"}>
+                <button className="primary-button" type="submit" disabled={isCreatingNewSchedule}>
                   일정 추가
                 </button>
               </footer>

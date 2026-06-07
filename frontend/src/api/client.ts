@@ -13,6 +13,7 @@ type FetchLike = typeof fetch;
 type ClientOptions = {
   baseUrl?: string;
   fetcher?: FetchLike;
+  accessToken?: string;
 };
 
 type StreamOptions = ClientOptions & {
@@ -21,7 +22,7 @@ type StreamOptions = ClientOptions & {
 
 export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8001";
 
-const jsonHeaders = { "Content-Type": "application/json" };
+const jsonHeaders: Record<string, string> = { "Content-Type": "application/json" };
 
 function resolveBaseUrl(baseUrl?: string) {
   return baseUrl ?? apiBaseUrl;
@@ -29,6 +30,26 @@ function resolveBaseUrl(baseUrl?: string) {
 
 function resolveFetcher(fetcher?: FetchLike) {
   return fetcher ?? fetch;
+}
+
+function authHeaders(accessToken?: string): Record<string, string> | undefined {
+  if (!accessToken) {
+    return undefined;
+  }
+  return { Authorization: `Bearer ${accessToken}` };
+}
+
+function jsonAuthHeaders(accessToken?: string): HeadersInit {
+  return { ...jsonHeaders, ...authHeaders(accessToken) };
+}
+
+function authInit(accessToken?: string): RequestInit | undefined {
+  const headers = authHeaders(accessToken);
+  return headers ? { headers } : undefined;
+}
+
+function fetchWithOptionalInit(fetcher: FetchLike, url: string, init?: RequestInit): ReturnType<FetchLike> {
+  return init ? fetcher(url, init) : fetcher(url);
 }
 
 async function parseJsonResponse<T>(response: Response): Promise<T> {
@@ -115,13 +136,19 @@ function parseSseFrame(frame: string): StreamEvent | null {
 }
 
 export async function fetchSchedules(options: ClientOptions = {}): Promise<ApiSchedule[]> {
-  const response = await resolveFetcher(options.fetcher)(`${resolveBaseUrl(options.baseUrl)}/api/v1/schedules`);
+  const response = await fetchWithOptionalInit(
+    resolveFetcher(options.fetcher),
+    `${resolveBaseUrl(options.baseUrl)}/api/v1/schedules`,
+    authInit(options.accessToken),
+  );
   return parseJsonResponse<ApiSchedule[]>(response);
 }
 
 export async function fetchSchedule(scheduleId: string, options: ClientOptions = {}): Promise<ApiSchedule> {
-  const response = await resolveFetcher(options.fetcher)(
+  const response = await fetchWithOptionalInit(
+    resolveFetcher(options.fetcher),
     `${resolveBaseUrl(options.baseUrl)}/api/v1/schedules/${scheduleId}`,
+    authInit(options.accessToken),
   );
   return parseJsonResponse<ApiSchedule>(response);
 }
@@ -133,7 +160,7 @@ export async function updateSchedule(
 ): Promise<ApiSchedule> {
   const response = await resolveFetcher(options.fetcher)(`${resolveBaseUrl(options.baseUrl)}/api/v1/schedules/${scheduleId}`, {
     method: "PATCH",
-    headers: jsonHeaders,
+    headers: jsonAuthHeaders(options.accessToken),
     body: JSON.stringify(compactBody(payload)),
   });
   return parseJsonResponse<ApiSchedule>(response);
@@ -142,6 +169,7 @@ export async function updateSchedule(
 export async function deleteSchedule(scheduleId: string, options: ClientOptions = {}): Promise<void> {
   const response = await resolveFetcher(options.fetcher)(`${resolveBaseUrl(options.baseUrl)}/api/v1/schedules/${scheduleId}`, {
     method: "DELETE",
+    headers: authHeaders(options.accessToken),
   });
   return parseEmptyResponse(response);
 }
@@ -156,7 +184,7 @@ export async function updateTaskDone(
     `${resolveBaseUrl(options.baseUrl)}/api/v1/schedules/${scheduleId}/tasks/${taskId}`,
     {
       method: "PATCH",
-      headers: jsonHeaders,
+      headers: jsonAuthHeaders(options.accessToken),
       body: JSON.stringify({ is_done: isDone }),
     },
   );
@@ -169,7 +197,7 @@ export async function streamCreateSchedule(
 ): Promise<StreamDoneData> {
   const response = await resolveFetcher(options.fetcher)(`${resolveBaseUrl(options.baseUrl)}/api/v1/schedules/stream`, {
     method: "POST",
-    headers: jsonHeaders,
+    headers: jsonAuthHeaders(options.accessToken),
     body: JSON.stringify(compactBody({ max_retry: 2, ...payload })),
   });
   return parseSseDone(response, options.onEvent);
@@ -184,7 +212,7 @@ export async function streamRegenerateSchedule(
     `${resolveBaseUrl(options.baseUrl)}/api/v1/schedules/${scheduleId}/stream`,
     {
       method: "POST",
-      headers: jsonHeaders,
+      headers: jsonAuthHeaders(options.accessToken),
       body: JSON.stringify(compactBody({ max_retry: 2, ...payload })),
     },
   );
