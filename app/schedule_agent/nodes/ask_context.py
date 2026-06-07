@@ -13,6 +13,8 @@ def ask_context(state: AgentState) -> dict:
         return {
             "detail_with_context": f"{detail_with_context}{addition}".strip(),
             "is_decomposable": state.get("is_decomposable", True),
+            "context_applied": True,
+            "context_question_source": question_source,
         }
 
     result = {

@@ -30,6 +30,8 @@ def route_after_pre_validate(state: AgentState) -> str:
         return "ask_context"
     if not state.get("is_valid", False):
         return "fallback"
+    if state.get("context_applied", False) and state.get("context_question_source") == "classification":
+        return "plan"
     return "classification"
 
 
@@ -41,6 +43,8 @@ def route_after_classification(state: AgentState) -> str:
         return "ask_context"
     if not state.get("is_decomposable", True):
         return "output"
+    if state.get("context_applied", False) and state.get("context_question_source") == "classification":
+        return "pre_validate"
     return "plan"
 
 
@@ -73,7 +77,7 @@ def create_graph():
     builder.add_conditional_edges(
         "pre_validate",
         route_after_pre_validate,
-        {"ask_context": "ask_context", "classification": "classification", "fallback": "fallback"},
+        {"ask_context": "ask_context", "classification": "classification", "plan": "plan", "fallback": "fallback"},
     )
     builder.add_conditional_edges(
         "ask_context",
@@ -83,7 +87,7 @@ def create_graph():
     builder.add_conditional_edges(
         "classification",
         route_after_classification,
-        {"ask_context": "ask_context", "plan": "plan", "output": "output"},
+        {"ask_context": "ask_context", "pre_validate": "pre_validate", "plan": "plan", "output": "output"},
     )
     builder.add_edge("plan", "post_validate")
     builder.add_conditional_edges(

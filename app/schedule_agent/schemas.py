@@ -49,6 +49,8 @@ class AgentState(TypedDict, total=False):
     detail_with_context: str
     location: str
     context_answer: str
+    context_applied: bool
+    context_question_source: Literal["", "classification", "pre_validate"]
     start_time: str
     end_time: str
     existing_schedules: list[dict]

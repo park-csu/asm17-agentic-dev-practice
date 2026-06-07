@@ -22,6 +22,7 @@ Accepted
 - 분류 질문과 사전 검증 질문은 `question_source`, `classification_retry`, `pre_validation_retry`로 의미와 재시도 횟수를 분리한다.
 - 분류 노드는 `is_decomposable`로 하위 task 분해 필요성을 판단한다. 분해 불필요 일정은 추가 질문하지 않지만 일정 유효성 검증은 거치며, 유효하면 `tasks=[]`인 성공 응답으로 종료한다.
 - `context_answer`가 있는 후속 요청은 먼저 `ask_context`에서 답변을 `detail_with_context`에 누적한 뒤, 질문 출처에 따라 분류 또는 사전 검증 노드로 재진입한다.
+- MVP 단계의 임시 fix로, 분류 질문 답변이 적용된 상태는 내부 플래그로 표시하고 분류가 완료되면 다시 사전 검증을 거쳐 최신 `normalized_schedule`을 만든 뒤 계획 단계로 이동한다. 현재 `pre_validate`가 유효성 검증과 계획 입력 정규화를 함께 담당하기 때문에 필요한 우회이며, 장기적으로는 `normalized_schedule` 생성을 별도 normalize/prepare 노드로 분리한다.
 
 ## Consequences
 - 각 단계의 책임과 테스트 지점이 명확해진다.
@@ -37,3 +38,5 @@ Accepted
 - 검증 모델 오류가 발생한 일정은 계획 단계로 통과하지 않는다.
 - 질문 출처별 재시도 횟수가 섞이지 않아 한 노드의 질문이 다른 노드의 질문 기회를 소모하지 않는다.
 - 분해 불필요 일정은 실패가 아니므로 fallback이 아니라 정상 응답으로 표현된다.
+- 분류 질문 답변 후에도 계획 노드는 빈 `normalized_schedule`이 아니라 최신 답변이 반영된 일정 컨텍스트를 받는다.
+- 이 결정은 MVP 안정화를 위한 임시 결정이며, 최종 구조에서는 `pre_validate`를 재호출하지 않고 정규화 책임을 별도 노드로 옮기는 편이 더 적절하다.

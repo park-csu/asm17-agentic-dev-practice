@@ -5,10 +5,12 @@ from unittest.mock import patch
 from app.api import create_schedule_tasks_stream
 from app.schedule_agent.graph import (
     create_graph,
+    route_after_ask_context,
     route_after_classification,
     route_after_post_validate,
     route_after_pre_validate,
 )
+from app.schedule_agent.nodes.ask_context import ask_context
 from app.schedule_agent.schemas import ScheduleTaskRequest
 
 
@@ -18,13 +20,48 @@ class ScheduleAgentGraphTest(unittest.TestCase):
 
         self.assertEqual(route_after_classification(state), "ask_context")
 
-    def test_route_after_classification_goes_to_pre_validate_when_enough_context(self):
+    def test_route_after_classification_goes_to_plan_when_enough_context(self):
         state = {"needs_question": False, "classification_retry": 0, "max_retry": 2}
 
-        self.assertEqual(route_after_classification(state), "pre_validate")
+        self.assertEqual(route_after_classification(state), "plan")
 
     def test_route_after_classification_stops_question_at_max_retry(self):
         state = {"needs_question": True, "classification_retry": 2, "max_retry": 2}
+
+        self.assertEqual(route_after_classification(state), "plan")
+
+    def test_ask_context_marks_classification_answer_context(self):
+        result = ask_context(
+            {
+                "detail_with_context": "발표자료 제작",
+                "context_answer": "하드웨어 판매 중심 BM입니다.",
+                "question": "어떤 BM을 강조하나요?",
+                "question_source": "classification",
+                "is_decomposable": True,
+            }
+        )
+
+        self.assertTrue(result["context_applied"])
+        self.assertEqual(result["context_question_source"], "classification")
+        self.assertIn("하드웨어 판매 중심 BM입니다.", result["detail_with_context"])
+
+    def test_route_after_ask_context_with_classification_answer_runs_classification_first(self):
+        state = {
+            "context_answer": "하드웨어 판매 중심 BM입니다.",
+            "question_source": "classification",
+        }
+
+        self.assertEqual(route_after_ask_context(state), "classification")
+
+    def test_classification_answer_revalidates_before_plan(self):
+        state = {
+            "needs_question": False,
+            "is_decomposable": True,
+            "classification_retry": 1,
+            "max_retry": 2,
+            "context_applied": True,
+            "context_question_source": "classification",
+        }
 
         self.assertEqual(route_after_classification(state), "pre_validate")
 
@@ -35,8 +72,17 @@ class ScheduleAgentGraphTest(unittest.TestCase):
             ),
             "ask_context",
         )
-        self.assertEqual(route_after_pre_validate({"is_valid": True}), "plan")
+        self.assertEqual(route_after_pre_validate({"is_valid": True}), "classification")
         self.assertEqual(route_after_pre_validate({"is_valid": False}), "fallback")
+
+    def test_pre_validate_after_classification_answer_goes_to_plan(self):
+        state = {
+            "is_valid": True,
+            "context_applied": True,
+            "context_question_source": "classification",
+        }
+
+        self.assertEqual(route_after_pre_validate(state), "plan")
 
     def test_route_after_pre_validate_stops_question_at_max_retry(self):
         state = {
