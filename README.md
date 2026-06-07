@@ -96,7 +96,7 @@ Docker Compose는 향후 ChromaDB 기반 일정 메모리 확장을 위해 `chro
 - API: `http://localhost:8001`
 - 초기 React UI: `http://localhost:5173`
 
-프론트엔드를 Vercel에 배포할 때는 `VITE_API_BASE_URL`을 배포된 FastAPI API 주소로 설정합니다. 이 값은 브라우저에 노출되는 공개 설정이므로 API 키 같은 비밀값을 넣지 않습니다. FastAPI의 `CORS_ORIGINS`에는 Vercel 프론트엔드 도메인을 추가해야 합니다.
+프론트엔드를 Vercel에 배포할 때는 `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`를 설정합니다. `VITE_SUPABASE_ANON_KEY`는 브라우저에 노출되는 Supabase 공개 키이며 service role key를 넣지 않습니다. FastAPI의 `CORS_ORIGINS`와 Supabase Auth의 redirect URL에는 프론트엔드 도메인을 추가해야 합니다.
 
 ## Usage
 
@@ -253,7 +253,7 @@ cd asm17-agentic-dev-practice
 cp .env.example .env
 ```
 
-`.env`에서 최소한 `UPSTAGE_API_KEY`를 채웁니다. Vercel 등 외부 배포 환경에서는 `VITE_API_BASE_URL`과 `CORS_ORIGINS`를 배포 주소에 맞게 조정합니다.
+`.env`에서 최소한 `UPSTAGE_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`를 채웁니다. Vercel 등 외부 배포 환경에서는 `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `CORS_ORIGINS`를 배포 주소에 맞게 조정합니다.
 
 3. 전체 앱은 Docker Compose로 실행합니다.
 

@@ -46,6 +46,8 @@ export function buildTaskGroups(schedules: CalendarSchedule[]): TaskDateGroup[] 
       title: schedule.title,
       start_time: schedule.start_time,
       end_time: schedule.end_time,
+      status: schedule.status,
+      fallback_reason: schedule.fallback_reason,
       tasks: sortedTasks,
     });
     groups.set(dateKey, current);

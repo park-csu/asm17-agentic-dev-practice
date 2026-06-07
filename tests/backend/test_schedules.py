@@ -1,13 +1,29 @@
+from uuid import UUID
+
 import pytest
 from httpx import AsyncClient
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from backend.api.schedules import get_overlapping_schedules
+from backend.api.schedules import ensure_user_exists, get_overlapping_schedules
+from backend.db.models import Task, User
 from tests.backend.factories import ScheduleFactory, TaskFactory
+
+
+async def ensure_test_user(db_session: AsyncSession, user_id: UUID):
+    user = await db_session.get(User, user_id)
+    if user:
+        return user
+    user = User(id=user_id, email=f"{user_id}@test.local", name="테스트 사용자")
+    db_session.add(user)
+    await db_session.commit()
+    return user
 
 
 async def create_schedule(db_session: AsyncSession, **kwargs):
     schedule = ScheduleFactory.build(**kwargs)
+    if schedule.user_id:
+        await ensure_test_user(db_session, schedule.user_id)
     db_session.add(schedule)
     await db_session.commit()
     await db_session.refresh(schedule)
@@ -100,6 +116,8 @@ async def test_delete_schedule(client: AsyncClient, db_session: AsyncSession):
 
     res = await client.get(f"/api/v1/schedules/{schedule.id}")
     assert res.status_code == 404
+    task_results = await db_session.exec(select(Task).where(Task.schedule_id == schedule.id))
+    assert task_results.all() == []
 
 
 async def test_delete_schedule_not_found(client: AsyncClient):
@@ -172,3 +190,44 @@ async def test_get_overlapping_schedules_can_exclude_current_schedule(db_session
     titles = {schedule["title"] for schedule in existing}
     assert "재생성 대상 일정" not in titles
     assert titles == {other.title}
+
+
+async def test_get_overlapping_schedules_filters_by_user_id(db_session: AsyncSession):
+    user_id = UUID("00000000-0000-0000-0000-000000000001")
+    other_user_id = UUID("00000000-0000-0000-0000-000000000002")
+    await create_schedule(db_session, title="내 일정", user_id=user_id)
+    await create_schedule(db_session, title="다른 사용자 일정", user_id=other_user_id)
+
+    existing = await get_overlapping_schedules(
+        db_session,
+        "2026-06-10T10:30:00",
+        "2026-06-10T11:30:00",
+        user_id=user_id,
+    )
+
+    titles = {schedule["title"] for schedule in existing}
+    assert titles == {"내 일정"}
+
+
+# ── 인증 사용자 보장 ───────────────────────────────────────────
+
+async def test_ensure_user_exists_creates_missing_user(db_session: AsyncSession):
+    user_id = UUID("00000000-0000-0000-0000-000000000123")
+
+    await ensure_user_exists(db_session, user_id)
+
+    result = await db_session.exec(select(User).where(User.id == user_id))
+    user = result.one()
+    assert user.email == f"{user_id}@taskpilot.local"
+
+
+async def test_ensure_user_exists_keeps_existing_user(db_session: AsyncSession):
+    user_id = UUID("00000000-0000-0000-0000-000000000124")
+    db_session.add(User(id=user_id, email="user@example.com", name="사용자"))
+    await db_session.commit()
+
+    await ensure_user_exists(db_session, user_id)
+
+    result = await db_session.exec(select(User).where(User.id == user_id))
+    user = result.one()
+    assert user.email == "user@example.com"

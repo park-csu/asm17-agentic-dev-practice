@@ -17,10 +17,14 @@ export type CalendarSchedule = {
   start_time: string;
   end_time: string;
   status: ScheduleStatus;
+  fallback_reason: string;
   tasks: CalendarTask[];
 };
 
-export type TaskGroupSchedule = Pick<CalendarSchedule, "id" | "title" | "start_time" | "end_time" | "tasks">;
+export type TaskGroupSchedule = Pick<
+  CalendarSchedule,
+  "id" | "title" | "start_time" | "end_time" | "status" | "fallback_reason" | "tasks"
+>;
 
 export type TaskDateGroup = {
   dateKey: string;

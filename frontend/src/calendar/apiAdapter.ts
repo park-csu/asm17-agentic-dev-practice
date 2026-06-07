@@ -12,6 +12,7 @@ export function apiScheduleToCalendarSchedule(schedule: ApiSchedule): CalendarSc
     start_time: schedule.start_time ?? "",
     end_time: schedule.end_time ?? "",
     status: normalizeStatus(schedule.status),
+    fallback_reason: schedule.fallback_reason,
     tasks: schedule.tasks.map(apiTaskToCalendarTask),
   };
 }

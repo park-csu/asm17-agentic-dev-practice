@@ -5,6 +5,7 @@ import type { ApiSchedule } from "./types";
 
 const runRealApi = import.meta.env.RUN_REAL_API === "1";
 const baseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8001";
+const accessToken = import.meta.env.VITE_API_ACCESS_TOKEN ?? "";
 
 function expectScheduleShape(schedule: ApiSchedule) {
   expect(schedule).toEqual(
@@ -24,9 +25,9 @@ function expectScheduleShape(schedule: ApiSchedule) {
   expect(schedule.end_time === null || typeof schedule.end_time === "string").toBe(true);
 }
 
-describe.skipIf(!runRealApi)("실제 API 응답", () => {
+describe.skipIf(!runRealApi || !accessToken)("실제 API 응답", () => {
   it("저장된 일정 목록을 백엔드에서 조회한다", async () => {
-    const schedules = await fetchSchedules({ baseUrl });
+    const schedules = await fetchSchedules({ baseUrl, accessToken });
 
     expect(Array.isArray(schedules)).toBe(true);
     for (const schedule of schedules) {
@@ -47,12 +48,12 @@ describe.skipIf(!runRealApi)("실제 API 응답", () => {
   });
 
   it("목록의 첫 일정 상세를 조회한다", async () => {
-    const schedules = await fetchSchedules({ baseUrl });
+    const schedules = await fetchSchedules({ baseUrl, accessToken });
     if (schedules.length === 0) {
       return;
     }
 
-    const schedule = await fetchSchedule(schedules[0].id, { baseUrl });
+    const schedule = await fetchSchedule(schedules[0].id, { baseUrl, accessToken });
 
     expectScheduleShape(schedule);
     expect(schedule.id).toBe(schedules[0].id);

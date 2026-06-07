@@ -205,7 +205,57 @@ class PreValidateScheduleTest(unittest.TestCase):
             result = pre_validate_schedule(state)
 
         self.assertFalse(result["is_valid"])
-        self.assertTrue(result["invalid_reason"])
+        self.assertIn("시간", result["invalid_reason"])
+        self.assertIn("해석", result["invalid_reason"])
+
+    def test_adds_specific_reason_for_ambiguous_schedule_without_llm_reason(self):
+        expected = PreValidationResult(
+            is_valid=False,
+            normalized_schedule={},
+            invalid_reason="",
+        )
+        state = {
+            "title": "할 일",
+            "detail_with_context": "",
+            "start_time": "2026-06-10T10:00:00+09:00",
+            "end_time": "2026-06-10T11:00:00+09:00",
+            "existing_schedules": [],
+        }
+
+        with patch(
+            "app.schedule_agent.nodes.pre_validate.get_llm",
+            return_value=FakeLlm(result=expected),
+        ):
+            result = pre_validate_schedule(state)
+
+        self.assertFalse(result["is_valid"])
+        self.assertIn("추상적", result["invalid_reason"])
+        self.assertIn("완료 기준", result["invalid_reason"])
+
+    def test_adds_actionable_reason_when_llm_returns_no_specific_reason(self):
+        expected = PreValidationResult(
+            is_valid=False,
+            normalized_schedule={},
+            invalid_reason="",
+        )
+        state = {
+            "title": "프로젝트 기획안 작성",
+            "detail_with_context": "분기 프로젝트 제안서 초안을 작성한다.",
+            "location": "회의실 A",
+            "start_time": "2026-06-10T10:00:00+09:00",
+            "end_time": "2026-06-10T11:00:00+09:00",
+            "existing_schedules": [],
+        }
+
+        with patch(
+            "app.schedule_agent.nodes.pre_validate.get_llm",
+            return_value=FakeLlm(result=expected),
+        ):
+            result = pre_validate_schedule(state)
+
+        self.assertFalse(result["is_valid"])
+        self.assertIn("구체적인 실패 사유", result["invalid_reason"])
+        self.assertIn("장소", result["invalid_reason"])
 
     def test_passes_location_to_llm_for_travel_feasibility_check(self):
         expected = PreValidationResult(

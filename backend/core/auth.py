@@ -9,6 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from backend.core.config import SUPABASE_URL
 
 bearer_scheme = HTTPBearer(auto_error=False)
+SUPPORTED_JWT_ALGORITHMS = ["RS256", "ES256", "HS256"]
 
 # JWKS 클라이언트 — 키를 자동으로 캐싱하고 갱신한다
 _jwks_client: Optional[PyJWKClient] = None
@@ -30,7 +31,7 @@ def verify_token(token: str) -> dict:
         payload = jwt.decode(
             token,
             signing_key.key,
-            algorithms=["RS256", "HS256"],
+            algorithms=SUPPORTED_JWT_ALGORITHMS,
             options={"verify_aud": False},
         )
         return payload

@@ -9,6 +9,7 @@ export const mockSchedules: CalendarSchedule[] = [
     start_time: "2026-06-07T09:30:00",
     end_time: "2026-06-07T11:30:00",
     status: "ok",
+    fallback_reason: "",
     tasks: [
       {
         id: "task-1",
@@ -44,6 +45,7 @@ export const mockSchedules: CalendarSchedule[] = [
     start_time: "2026-06-07T14:00:00",
     end_time: "2026-06-07T15:00:00",
     status: "needs_question",
+    fallback_reason: "",
     tasks: [],
   },
   {
@@ -54,6 +56,7 @@ export const mockSchedules: CalendarSchedule[] = [
     start_time: "2026-06-08T10:00:00",
     end_time: "2026-06-08T12:00:00",
     status: "pending",
+    fallback_reason: "",
     tasks: [
       {
         id: "task-4",
@@ -81,6 +84,7 @@ export const mockSchedules: CalendarSchedule[] = [
     start_time: "2026-06-09T16:00:00",
     end_time: "2026-06-09T17:30:00",
     status: "fallback",
+    fallback_reason: "배포 환경변수 구성이 불완전해 task를 생성하지 못했습니다.",
     tasks: [],
   },
 ];

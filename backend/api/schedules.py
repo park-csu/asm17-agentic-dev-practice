@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
+from sqlalchemy import delete
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from backend.core.auth import get_current_user_id
@@ -12,7 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.schedule_agent.graph import create_graph
 from app.schedule_agent.schemas import StreamEvent
-from backend.db.models import Schedule, Task
+from backend.db.models import Schedule, Task, User
 from backend.db.session import AsyncSessionLocal, get_session
 
 router = APIRouter(tags=["schedules"])
@@ -122,6 +123,7 @@ async def get_overlapping_schedules(
     start_time: str,
     end_time: str,
     exclude_schedule_id: UUID | None = None,
+    user_id: UUID | None = None,
 ) -> list[dict]:
     """저장된 ok 상태 일정 중 시간이 겹치는 것만 반환한다."""
     start_at = parse_datetime(start_time)
@@ -133,6 +135,8 @@ async def get_overlapping_schedules(
         Schedule.start_time < end_at,
         Schedule.end_time > start_at,
     )
+    if user_id is not None:
+        stmt = stmt.where(Schedule.user_id == user_id)
     if exclude_schedule_id is not None:
         stmt = stmt.where(Schedule.id != exclude_schedule_id)
     results = await session.exec(stmt)
@@ -145,6 +149,19 @@ async def get_overlapping_schedules(
         }
         for s in results.all()
     ]
+
+
+async def ensure_user_exists(session: AsyncSession, user_id: UUID) -> None:
+    user = await session.get(User, user_id)
+    if user:
+        return
+
+    session.add(User(
+        id=user_id,
+        email=f"{user_id}@taskpilot.local",
+        name="",
+    ))
+    await session.commit()
 
 
 def build_agent_state(req: CreateScheduleRequest, existing_schedules: list[dict]) -> dict:
@@ -309,7 +326,8 @@ async def create_schedule_stream(
     user_id: UUID = Depends(get_current_user_id),
 ):
     async with AsyncSessionLocal() as session:
-        existing = await get_overlapping_schedules(session, req.start_time, req.end_time)
+        await ensure_user_exists(session, user_id)
+        existing = await get_overlapping_schedules(session, req.start_time, req.end_time, user_id=user_id)
 
     initial_state = build_agent_state(req, existing)
 
@@ -435,9 +453,8 @@ async def delete_schedule(
     schedule = await session.get(Schedule, schedule_id)
     if not schedule or schedule.user_id != user_id:
         raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
-    task_results = await session.exec(select(Task).where(Task.schedule_id == schedule_id))
-    for task in task_results.all():
-        await session.delete(task)
+    await session.exec(delete(Task).where(Task.schedule_id == schedule_id))
+    await session.flush()
     await session.delete(schedule)
     await session.commit()
 
@@ -536,6 +553,7 @@ async def regenerate_schedule_stream(
         schedule.start_time.isoformat() if schedule.start_time else "",
         schedule.end_time.isoformat() if schedule.end_time else "",
         exclude_schedule_id=schedule_id,
+        user_id=user_id,
     )
     create_req = CreateScheduleRequest(
         title=schedule.title,

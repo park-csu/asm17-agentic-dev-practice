@@ -67,6 +67,16 @@ describe("api client 요청 계약", () => {
     expect(fetcher).toHaveBeenCalledWith(`${baseUrl}/api/v1/schedules`);
   });
 
+  it("인증 토큰이 있으면 일정 목록 요청에 Bearer 헤더를 포함한다", async () => {
+    const fetcher = vi.fn().mockResolvedValue(jsonResponse([]));
+
+    await fetchSchedules({ baseUrl, fetcher, accessToken: "access-token" });
+
+    const [url, init] = getRequest(fetcher);
+    expect(url).toBe(`${baseUrl}/api/v1/schedules`);
+    expect(init?.headers).toEqual({ Authorization: "Bearer access-token" });
+  });
+
   it("일정 수정은 API가 지원하는 메타데이터만 전송한다", async () => {
     const fetcher = vi.fn().mockResolvedValue(jsonResponse({ id: "schedule-1" }));
 
@@ -79,6 +89,7 @@ describe("api client 요청 계약", () => {
     const [url, init] = getRequest(fetcher);
     expect(url).toBe(`${baseUrl}/api/v1/schedules/schedule-1`);
     expect(init?.method).toBe("PATCH");
+    expect(init?.headers).toEqual({ "Content-Type": "application/json" });
     expect(JSON.parse(init?.body as string)).toEqual({
       title: "수정",
       detail: "상세",
@@ -133,6 +144,27 @@ describe("api client 요청 계약", () => {
       end_time: "2026-06-10T12:00",
     });
     expect(result.status).toBe("needs_question");
+  });
+
+  it("stream 생성 요청에 인증 토큰을 포함한다", async () => {
+    const fetcher = vi.fn().mockResolvedValue(sseDoneResponse({ status: "ok" }));
+
+    await streamCreateSchedule(
+      {
+        title: "발표 준비",
+        detail: "자료 조사",
+        location: "회의실",
+        start_time: "2026-06-10T10:00",
+        end_time: "2026-06-10T12:00",
+      },
+      { baseUrl, fetcher, accessToken: "access-token" },
+    );
+
+    const [, init] = getRequest(fetcher);
+    expect(init?.headers).toEqual({
+      "Content-Type": "application/json",
+      Authorization: "Bearer access-token",
+    });
   });
 
   it("stream 중간 node 이벤트를 콜백으로 전달한다", async () => {

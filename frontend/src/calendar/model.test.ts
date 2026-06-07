@@ -12,6 +12,7 @@ const schedules: CalendarSchedule[] = [
     start_time: "2026-06-06T09:00:00",
     end_time: "2026-06-06T10:00:00",
     status: "ok",
+    fallback_reason: "",
     tasks: [],
   },
   {
@@ -22,6 +23,7 @@ const schedules: CalendarSchedule[] = [
     start_time: "2026-06-07T09:00:00",
     end_time: "2026-06-07T11:00:00",
     status: "ok",
+    fallback_reason: "",
     tasks: [],
   },
   {
@@ -32,6 +34,7 @@ const schedules: CalendarSchedule[] = [
     start_time: "2026-06-07T14:00:00",
     end_time: "2026-06-07T15:00:00",
     status: "pending",
+    fallback_reason: "",
     tasks: [],
   },
 ];

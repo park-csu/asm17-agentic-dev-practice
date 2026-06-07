@@ -36,6 +36,7 @@ describe("api schedule adapter", () => {
       start_time: "2026-06-08T10:00:00",
       end_time: "2026-06-08T12:00:00",
       status: "ok",
+      fallback_reason: "",
       tasks: [
         {
           id: "task-1",
