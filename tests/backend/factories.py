@@ -1,9 +1,11 @@
 from datetime import datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import factory
 
 from backend.db.models import Schedule, Task, User
+
+TEST_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 class UserFactory(factory.Factory):
@@ -21,7 +23,7 @@ class ScheduleFactory(factory.Factory):
         model = Schedule
 
     id = factory.LazyFunction(uuid4)
-    user_id = None
+    user_id = TEST_USER_ID
     title = factory.Sequence(lambda n: f"테스트 일정 {n}")
     detail = "테스트 상세 내용"
     location = "서울특별시"

@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from backend.core.auth import get_current_user_id
 from pydantic import BaseModel, Field
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -177,10 +178,11 @@ def build_agent_state(req: CreateScheduleRequest, existing_schedules: list[dict]
     }
 
 
-async def save_result(result: dict, req: CreateScheduleRequest) -> Schedule:
+async def save_result(result: dict, req: CreateScheduleRequest, user_id: Optional[UUID] = None) -> Schedule:
     """에이전트 결과를 DB에 저장하고 Schedule 인스턴스를 반환한다."""
     async with AsyncSessionLocal() as session:
         schedule = Schedule(
+            user_id=user_id,
             title=result.get("title") or req.title or "",
             detail=req.detail,
             location=result.get("location") or req.location,
@@ -302,7 +304,10 @@ data: {"event": "done", "node": "", "data": "{...}"}
 """,
     responses={200: {"description": "SSE 스트림", "content": {"text/event-stream": {}}}},
 )
-async def create_schedule_stream(req: CreateScheduleRequest):
+async def create_schedule_stream(
+    req: CreateScheduleRequest,
+    user_id: UUID = Depends(get_current_user_id),
+):
     async with AsyncSessionLocal() as session:
         existing = await get_overlapping_schedules(session, req.start_time, req.end_time)
 
@@ -324,7 +329,7 @@ async def create_schedule_stream(req: CreateScheduleRequest):
             elif mode == "values":
                 final_state = chunk
 
-        saved = await save_result(final_state, req)
+        saved = await save_result(final_state, req, user_id)
         done_data = {
             "schedule_id": str(saved.id),
             "status": final_state.get("status", "fallback"),
@@ -350,8 +355,15 @@ async def create_schedule_stream(req: CreateScheduleRequest):
     summary="일정 목록 조회",
     description="저장된 모든 일정을 최신순으로 반환합니다. 각 일정에 서브태스크 목록이 포함됩니다.",
 )
-async def list_schedules(session: AsyncSession = Depends(get_session)):
-    results = await session.exec(select(Schedule).order_by(Schedule.created_at.desc()))
+async def list_schedules(
+    session: AsyncSession = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    results = await session.exec(
+        select(Schedule)
+        .where(Schedule.user_id == user_id)
+        .order_by(Schedule.created_at.desc())
+    )
     schedules = results.all()
     response = []
     for s in schedules:
@@ -367,9 +379,13 @@ async def list_schedules(session: AsyncSession = Depends(get_session)):
     description="일정 UUID로 상세 정보와 서브태스크 목록을 반환합니다.",
     responses={404: {"description": "일정을 찾을 수 없음"}},
 )
-async def get_schedule(schedule_id: UUID, session: AsyncSession = Depends(get_session)):
+async def get_schedule(
+    schedule_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
+):
     schedule = await session.get(Schedule, schedule_id)
-    if not schedule:
+    if not schedule or schedule.user_id != user_id:
         raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
     task_results = await session.exec(select(Task).where(Task.schedule_id == schedule_id))
     return to_schedule_response(schedule, task_results.all())
@@ -386,9 +402,10 @@ async def update_schedule(
     schedule_id: UUID,
     req: UpdateScheduleRequest,
     session: AsyncSession = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
 ):
     schedule = await session.get(Schedule, schedule_id)
-    if not schedule:
+    if not schedule or schedule.user_id != user_id:
         raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
     if req.title is not None:
         schedule.title = req.title
@@ -410,9 +427,13 @@ async def update_schedule(
     description="일정과 연결된 모든 서브태스크를 삭제합니다.",
     responses={404: {"description": "일정을 찾을 수 없음"}},
 )
-async def delete_schedule(schedule_id: UUID, session: AsyncSession = Depends(get_session)):
+async def delete_schedule(
+    schedule_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
+):
     schedule = await session.get(Schedule, schedule_id)
-    if not schedule:
+    if not schedule or schedule.user_id != user_id:
         raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
     task_results = await session.exec(select(Task).where(Task.schedule_id == schedule_id))
     for task in task_results.all():
@@ -433,7 +454,11 @@ async def update_task(
     task_id: UUID,
     req: UpdateTaskRequest,
     session: AsyncSession = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
 ):
+    schedule = await session.get(Schedule, schedule_id)
+    if not schedule or schedule.user_id != user_id:
+        raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
     task = await session.get(Task, task_id)
     if not task or task.schedule_id != schedule_id:
         raise HTTPException(status_code=404, detail="태스크를 찾을 수 없습니다.")
@@ -469,7 +494,11 @@ async def delete_task(
     schedule_id: UUID,
     task_id: UUID,
     session: AsyncSession = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
 ):
+    schedule = await session.get(Schedule, schedule_id)
+    if not schedule or schedule.user_id != user_id:
+        raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
     task = await session.get(Task, task_id)
     if not task or task.schedule_id != schedule_id:
         raise HTTPException(status_code=404, detail="태스크를 찾을 수 없습니다.")
@@ -496,9 +525,10 @@ async def regenerate_schedule_stream(
     schedule_id: UUID,
     req: RegenerateScheduleRequest = RegenerateScheduleRequest(),
     session: AsyncSession = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
 ):
     schedule = await session.get(Schedule, schedule_id)
-    if not schedule:
+    if not schedule or schedule.user_id != user_id:
         raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
 
     existing = await get_overlapping_schedules(
