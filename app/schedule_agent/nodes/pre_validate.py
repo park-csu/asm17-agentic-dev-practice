@@ -30,6 +30,24 @@ QUESTION_PLACEHOLDER_KEYWORDS = (
     "empty string",
     "default value",
 )
+AMBIGUOUS_SCHEDULE_TEXTS = {
+    "todo",
+    "task",
+    "기타",
+    "무언가",
+    "뭔가",
+    "뭔가 하기",
+    "업무",
+    "일",
+    "일정",
+    "작업",
+    "준비",
+    "정리",
+    "처리",
+    "할 일",
+    "할일",
+    "확인",
+}
 
 
 def parse_iso_datetime(value: str) -> datetime | None:
@@ -120,6 +138,48 @@ def has_meaningful_question(question: str) -> bool:
     return bool(normalized) and not any(
         keyword in normalized for keyword in QUESTION_PLACEHOLDER_KEYWORDS
     )
+
+
+def normalize_text(value: str) -> str:
+    """문장 내 연속 공백을 줄여 모호성 판단용 문자열을 만든다."""
+    return " ".join(value.strip().lower().split())
+
+
+def has_ambiguous_schedule_context(title: str, detail_with_context: str) -> bool:
+    """입력만으로 목적이나 완료 기준을 알기 어려운 일정인지 판단한다."""
+    normalized_title = normalize_text(title)
+    normalized_detail = normalize_text(detail_with_context)
+    combined = normalize_text(f"{title} {detail_with_context}")
+
+    if not combined:
+        return True
+    if len(combined) < 8:
+        return True
+    if normalized_title in AMBIGUOUS_SCHEDULE_TEXTS and not normalized_detail:
+        return True
+    if normalized_title in AMBIGUOUS_SCHEDULE_TEXTS and normalized_detail in AMBIGUOUS_SCHEDULE_TEXTS:
+        return True
+    return False
+
+
+def build_missing_invalid_reason(
+    title: str,
+    detail_with_context: str,
+    location: str,
+    start_at: datetime | None,
+    end_at: datetime | None,
+    travel_context: list[dict],
+) -> str:
+    """모델이 invalid 사유를 비워 둔 경우 사용자가 수정할 수 있는 사유를 보강한다."""
+    if not start_at or not end_at:
+        return "일정 시작 시간 또는 종료 시간 표현을 해석할 수 없습니다."
+    if travel_context:
+        return "일정 사이 위치 이동 시간이 부족할 가능성이 있습니다. 장소 도착이 필수인지, 온라인 또는 이동 중 수행이 가능한지 상세에 적어 주세요."
+    if has_ambiguous_schedule_context(title, detail_with_context):
+        return "일정 제목 또는 상세가 너무 추상적입니다. 무엇을 완료해야 하는지 알 수 있도록 목적, 산출물, 완료 기준을 구체적으로 적어 주세요."
+    if location.strip():
+        return "유효성 검증이 구체적인 실패 사유를 반환하지 않았습니다. 일정의 목적, 완료 기준, 해당 장소에서 반드시 수행해야 하는 조건을 상세에 보강해 주세요."
+    return "유효성 검증이 구체적인 실패 사유를 반환하지 않았습니다. 일정의 목적, 산출물, 완료 기준을 상세에 더 구체적으로 적어 주세요."
 
 
 def pre_validate_schedule(state: AgentState, *, strict: bool = False) -> dict:
@@ -234,12 +294,14 @@ def pre_validate_schedule(state: AgentState, *, strict: bool = False) -> dict:
             result_dict["invalid_reason"] = ""
             return result_dict
         if not result_dict["is_valid"] and not result_dict["invalid_reason"].strip():
-            if not start_at or not end_at:
-                result_dict["invalid_reason"] = "일정 시간 표현을 해석할 수 없습니다."
-            elif travel_context:
-                result_dict["invalid_reason"] = "일정 위치 간 이동 가능성을 충족하지 못했습니다."
-            else:
-                result_dict["invalid_reason"] = "일정의 목적 또는 실행 조건이 유효성 검증 기준을 충족하지 못했습니다."
+            result_dict["invalid_reason"] = build_missing_invalid_reason(
+                title,
+                detail_with_context,
+                location,
+                start_at,
+                end_at,
+                travel_context,
+            )
         result_dict["question_source"] = ""
         return result_dict
     except Exception as e:
