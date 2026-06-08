@@ -697,7 +697,7 @@ export default function App() {
             eventClick={handleEventClick}
             select={handleDateSelect}
             dateClick={handleDateClick}
-            slotMinTime="07:00:00"
+            slotMinTime="00:00:00"
             slotMaxTime="24:00:00"
             eventDidMount={(info) => {
               info.el.dataset.scheduleId = info.event.id;
