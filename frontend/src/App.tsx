@@ -5,7 +5,7 @@ import listPlugin from "@fullcalendar/list";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import { EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
 import type { Session } from "@supabase/supabase-js";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   deleteSchedule,
@@ -59,6 +59,12 @@ type ScheduleFormState = {
 type Notice = {
   tone: "info" | "danger";
   message: string;
+};
+
+type PopoverAnchor = {
+  top: number;
+  left: number;
+  right: number;
 };
 
 const emptyForm: ScheduleFormState = {
@@ -156,7 +162,19 @@ function createTemporaryScheduleId(): string {
   return `temp-schedule-${crypto.randomUUID()}`;
 }
 
+function getSchedulePopoverAnchor(scheduleId: string): PopoverAnchor | null {
+  const escapedScheduleId = CSS.escape(scheduleId);
+  const el = document.querySelector(`[data-schedule-id="${escapedScheduleId}"]`);
+  if (!el) {
+    return null;
+  }
+  const rect = el.getBoundingClientRect();
+  return { top: rect.top, left: rect.left, right: rect.right };
+}
+
 export default function App() {
+  const calendarRef = useRef<FullCalendar | null>(null);
+  const calendarSurfaceRef = useRef<HTMLDivElement | null>(null);
   const [schedules, setSchedules] = useState<CalendarSchedule[]>([]);
   const [selectedScheduleId, setSelectedScheduleId] = useState("");
   const [newScheduleForm, setNewScheduleForm] = useState<ScheduleFormState | null>(null);
@@ -166,7 +184,7 @@ export default function App() {
   const [loadingScheduleId, setLoadingScheduleId] = useState("");
   const [completedNodesByScheduleId, setCompletedNodesByScheduleId] = useState<Record<string, string[]>>({});
   const [popoverScheduleId, setPopoverScheduleId] = useState("");
-  const [popoverAnchor, setPopoverAnchor] = useState<{ top: number; left: number; right: number } | null>(null);
+  const [popoverAnchor, setPopoverAnchor] = useState<PopoverAnchor | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [streamContextByScheduleId, setStreamContextByScheduleId] = useState<Record<string, StreamDoneData>>({});
   const [contextAnswer, setContextAnswer] = useState("");
@@ -224,15 +242,49 @@ export default function App() {
 
   useEffect(() => {
     if (!popoverScheduleId || popoverAnchor !== null) return;
-    const timer = setTimeout(() => {
-      const el = document.querySelector(`[data-schedule-id="${popoverScheduleId}"]`);
-      if (el) {
-        const rect = el.getBoundingClientRect();
-        setPopoverAnchor({ top: rect.top, left: rect.left, right: rect.right });
+    const frameId = requestAnimationFrame(() => {
+      const anchor = getSchedulePopoverAnchor(popoverScheduleId);
+      if (anchor) {
+        setPopoverAnchor(anchor);
       }
-    }, 50);
-    return () => clearTimeout(timer);
+    });
+    return () => cancelAnimationFrame(frameId);
   }, [popoverScheduleId, popoverAnchor]);
+
+  useEffect(() => {
+    const surface = calendarSurfaceRef.current;
+    if (!surface) {
+      return;
+    }
+
+    let frameId = 0;
+    const updateCalendarSize = () => {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        calendarRef.current?.getApi().updateSize();
+        if (popoverScheduleId) {
+          const anchor = getSchedulePopoverAnchor(popoverScheduleId);
+          if (anchor) {
+            setPopoverAnchor(anchor);
+          }
+        }
+      });
+    };
+
+    updateCalendarSize();
+
+    if (typeof ResizeObserver === "undefined") {
+      return () => cancelAnimationFrame(frameId);
+    }
+
+    const observer = new ResizeObserver(updateCalendarSize);
+    observer.observe(surface);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
+  }, [popoverScheduleId]);
 
   useEffect(() => {
     if (isAuthLoading) {
@@ -670,8 +722,9 @@ export default function App() {
           </div>
         </header>
 
-        <div className="calendar-surface">
+        <div className="calendar-surface" ref={calendarSurfaceRef}>
           <FullCalendar
+            ref={calendarRef}
             plugins={[dayGridPlugin, interactionPlugin, listPlugin, timeGridPlugin]}
             initialView="timeGridWeek"
             headerToolbar={{
@@ -770,7 +823,7 @@ export default function App() {
         </div>
       </aside>
 
-      {popoverSchedule && (
+      {popoverSchedule && popoverAnchor && (
         <>
           <div className="popover-backdrop" onClick={() => setPopoverScheduleId("")} aria-hidden="true" />
           <SchedulePopover
