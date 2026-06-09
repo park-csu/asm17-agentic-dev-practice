@@ -17,7 +17,7 @@ PRE_VALIDATE_SYSTEM = """당신은 일정 유효성 검증 노드입니다.
 
 검증 기준:
 1. 시작 시간 또는 종료 시간이 비어 있거나 해석 불가능하면 invalid입니다.
-2. 일정 제목과 상세가 모두 모호하거나, "일정", "뭔가 한다"처럼 목적과 완료 기준을 알 수 없으면 invalid입니다.
+2. 일정 제목과 상세가 모두 완전히 비어 있거나 단어 1~2개뿐인 극단적 경우에만 invalid입니다. 내용이 있지만 목적이나 완료 기준이 불분명하면 invalid로 처리하지 말고 needs_question=true로 설정해 목적과 완료 기준을 질문하세요.
 3. 시작 시간이 종료 시간보다 같거나 늦으면 invalid입니다.
 4. existing_schedules와 같은 시간대에 명백히 겹치면 invalid입니다.
 5. travel_context는 위치가 명시된 일정 사이의 이동 가능 시간 gap_minutes를 제공합니다. 두 위치와 gap_minutes를 함께 보고 이동이 명백히 불가능한 경우에만 invalid입니다. 예: 서울에서 부산까지 60분은 invalid입니다.

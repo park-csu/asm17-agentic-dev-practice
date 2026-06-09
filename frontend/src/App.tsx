@@ -5,7 +5,7 @@ import listPlugin from "@fullcalendar/list";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import { EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
 import type { Session } from "@supabase/supabase-js";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   deleteSchedule,
@@ -21,6 +21,15 @@ import { isSupabaseConfigured, signInWithGoogle, signOut, supabase } from "./aut
 import { apiScheduleToCalendarSchedule, apiSchedulesToCalendarSchedules } from "./calendar/apiAdapter";
 import { buildTaskGroups, findClosestScheduleId, formatDateLabel, formatTimeRange } from "./calendar/model";
 import type { CalendarSchedule, ScheduleStatus } from "./calendar/types";
+
+const AGENT_STEPS: { key: string; label: string; optional?: boolean }[] = [
+  { key: "pre_validate", label: "일정 유효성 검증" },
+  { key: "classification", label: "분해 필요성 판단" },
+  { key: "ask_context", label: "추가 맥락 반영", optional: true },
+  { key: "plan", label: "task 생성" },
+  { key: "post_validate", label: "task 검증" },
+  { key: "output", label: "결과 정리" },
+];
 
 const statusLabel: Record<ScheduleStatus, string> = {
   ok: "ok",
@@ -50,6 +59,12 @@ type ScheduleFormState = {
 type Notice = {
   tone: "info" | "danger";
   message: string;
+};
+
+type PopoverAnchor = {
+  top: number;
+  left: number;
+  right: number;
 };
 
 const emptyForm: ScheduleFormState = {
@@ -140,14 +155,26 @@ function buildContinuationPayload(doneData: StreamDoneData, contextAnswer: strin
 }
 
 function getFallbackReason(reason: string): string {
-  return reason.trim() || "task 생성에 실패했습니다.";
+  return reason.trim() || "일정 상세 내용을 더 구체적으로 작성 후 재시도하세요.";
 }
 
 function createTemporaryScheduleId(): string {
   return `temp-schedule-${crypto.randomUUID()}`;
 }
 
+function getSchedulePopoverAnchor(scheduleId: string): PopoverAnchor | null {
+  const escapedScheduleId = CSS.escape(scheduleId);
+  const el = document.querySelector(`[data-schedule-id="${escapedScheduleId}"]`);
+  if (!el) {
+    return null;
+  }
+  const rect = el.getBoundingClientRect();
+  return { top: rect.top, left: rect.left, right: rect.right };
+}
+
 export default function App() {
+  const calendarRef = useRef<FullCalendar | null>(null);
+  const calendarSurfaceRef = useRef<HTMLDivElement | null>(null);
   const [schedules, setSchedules] = useState<CalendarSchedule[]>([]);
   const [selectedScheduleId, setSelectedScheduleId] = useState("");
   const [newScheduleForm, setNewScheduleForm] = useState<ScheduleFormState | null>(null);
@@ -155,23 +182,24 @@ export default function App() {
   const [detailForm, setDetailForm] = useState<ScheduleFormState>(emptyForm);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [loadingScheduleId, setLoadingScheduleId] = useState("");
-  const [streamProgress, setStreamProgress] = useState("");
+  const [completedNodesByScheduleId, setCompletedNodesByScheduleId] = useState<Record<string, string[]>>({});
+  const [popoverScheduleId, setPopoverScheduleId] = useState("");
+  const [popoverAnchor, setPopoverAnchor] = useState<PopoverAnchor | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [streamContextByScheduleId, setStreamContextByScheduleId] = useState<Record<string, StreamDoneData>>({});
-  const [contextAnswer, setContextAnswer] = useState("");
+  const [contextAnswerByScheduleId, setContextAnswerByScheduleId] = useState<Record<string, string>>({});
   const [authSession, setAuthSession] = useState<Session | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const accessToken = authSession?.access_token ?? "";
   const isCreatingNewSchedule = loadingScheduleId.startsWith("temp-schedule-");
-  const selectedSchedule = schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null;
   const calendarEvents = useMemo(() => toCalendarEvents(schedules, selectedScheduleId), [schedules, selectedScheduleId]);
   const taskGroups = useMemo(() => buildTaskGroups(schedules), [schedules]);
-  const selectedContinuation = selectedSchedule ? streamContextByScheduleId[selectedSchedule.id] : undefined;
-  const canAnswerQuestion =
-    selectedSchedule?.status === "needs_question" && selectedContinuation && selectedContinuation.question.trim().length > 0;
+  const popoverSchedule = schedules.find((s) => s.id === popoverScheduleId) ?? null;
+  const popoverContextAnswer = popoverScheduleId ? contextAnswerByScheduleId[popoverScheduleId] ?? "" : "";
 
   useEffect(() => {
     if (!supabase) {
@@ -202,6 +230,7 @@ export default function App() {
         setSchedules([]);
         setSelectedScheduleId("");
         setStreamContextByScheduleId({});
+        setContextAnswerByScheduleId({});
       }
     });
 
@@ -210,6 +239,52 @@ export default function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!popoverScheduleId || popoverAnchor !== null) return;
+    const frameId = requestAnimationFrame(() => {
+      const anchor = getSchedulePopoverAnchor(popoverScheduleId);
+      if (anchor) {
+        setPopoverAnchor(anchor);
+      }
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [popoverScheduleId, popoverAnchor]);
+
+  useEffect(() => {
+    const surface = calendarSurfaceRef.current;
+    if (!surface) {
+      return;
+    }
+
+    let frameId = 0;
+    const updateCalendarSize = () => {
+      cancelAnimationFrame(frameId);
+      frameId = requestAnimationFrame(() => {
+        calendarRef.current?.getApi().updateSize();
+        if (popoverScheduleId) {
+          const anchor = getSchedulePopoverAnchor(popoverScheduleId);
+          if (anchor) {
+            setPopoverAnchor(anchor);
+          }
+        }
+      });
+    };
+
+    updateCalendarSize();
+
+    if (typeof ResizeObserver === "undefined") {
+      return () => cancelAnimationFrame(frameId);
+    }
+
+    const observer = new ResizeObserver(updateCalendarSize);
+    observer.observe(surface);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
+  }, [popoverScheduleId]);
 
   useEffect(() => {
     if (isAuthLoading) {
@@ -258,8 +333,10 @@ export default function App() {
   }
 
   function handleEventClick(info: EventClickArg) {
+    const rect = info.el.getBoundingClientRect();
     setSelectedScheduleId(info.event.id);
-    openDetail(info.event.id);
+    setPopoverScheduleId(info.event.id);
+    setPopoverAnchor({ top: rect.top, left: rect.left, right: rect.right });
   }
 
   function handleDateSelect(info: { startStr: string; endStr: string; view: { calendar: { unselect: () => void } } }) {
@@ -329,11 +406,14 @@ export default function App() {
     setSchedules((current) => [temporarySchedule, ...current]);
     setSelectedScheduleId(temporaryScheduleId);
     setLoadingScheduleId(temporaryScheduleId);
-    setStreamProgress("에이전트 실행 중");
-    setNotice({ tone: "info", message: "새 일정 생성 중: 에이전트 실행 중" });
+    setPopoverScheduleId(temporaryScheduleId);
+    setPopoverAnchor(null);
 
     try {
-      const doneData = await streamCreateSchedule(payload, { accessToken, onEvent: handleStreamEvent });
+      const doneData = await streamCreateSchedule(payload, {
+        accessToken,
+        onEvent: (e) => handleStreamEventForSchedule(temporaryScheduleId, e),
+      });
       const apiSchedule = await fetchSchedule(doneData.schedule_id, { accessToken });
       const schedule = apiScheduleToCalendarSchedule(apiSchedule);
       setSchedules((current) => {
@@ -345,14 +425,18 @@ export default function App() {
         return [schedule, ...replaced.filter((item) => item.id !== temporaryScheduleId)];
       });
       setSelectedScheduleId(schedule.id);
+      setCompletedNodesByScheduleId((current) => {
+        const nodes = current[temporaryScheduleId] ?? [];
+        const { [temporaryScheduleId]: _drop, ...rest } = current;
+        return { ...rest, [schedule.id]: nodes };
+      });
+      setPopoverScheduleId(schedule.id);
       rememberContinuation(doneData);
-      setNotice({ tone: "info", message: "일정 생성이 완료되었습니다." });
     } catch (error) {
       setNotice({ tone: "danger", message: getErrorMessage(error, "일정 생성에 실패했습니다.") });
       await loadSchedules();
     } finally {
       setLoadingScheduleId("");
-      setStreamProgress("");
     }
   }
 
@@ -403,6 +487,11 @@ export default function App() {
         delete next[scheduleId];
         return next;
       });
+      setContextAnswerByScheduleId((current) => {
+        const next = { ...current };
+        delete next[scheduleId];
+        return next;
+      });
       if (selectedScheduleId === scheduleId) {
         setSelectedScheduleId("");
       }
@@ -424,31 +513,42 @@ export default function App() {
 
     closeDetail();
     setLoadingScheduleId(scheduleId);
-    setStreamProgress("에이전트 실행 중");
-    setNotice({ tone: "info", message: "task 재생성 중: 에이전트 실행 중" });
+    setCompletedNodesByScheduleId((current) => {
+      if (payload) {
+        const prevNodes = current[scheduleId] ?? [];
+        const keepNodes = prevNodes.filter((n) => n === "pre_validate" || n === "classification");
+        return { ...current, [scheduleId]: keepNodes };
+      }
+      const { [scheduleId]: _drop, ...rest } = current;
+      return rest;
+    });
+    setPopoverScheduleId(scheduleId);
 
     try {
-      const doneData = await streamRegenerateSchedule(scheduleId, payload, { accessToken, onEvent: handleStreamEvent });
+      const doneData = await streamRegenerateSchedule(scheduleId, payload, {
+        accessToken,
+        onEvent: (e) => handleStreamEventForSchedule(scheduleId, e),
+      });
       await refreshSchedule(scheduleId);
       rememberContinuation(doneData);
       setSelectedScheduleId(scheduleId);
-      setContextAnswer("");
-      setNotice({ tone: "info", message: "task 재생성이 완료되었습니다." });
     } catch (error) {
       setNotice({ tone: "danger", message: getErrorMessage(error, "task 재생성에 실패했습니다.") });
     } finally {
       setLoadingScheduleId("");
-      setStreamProgress("");
     }
   }
 
   async function submitContextAnswer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedSchedule || !selectedContinuation || !contextAnswer.trim()) {
+    const scheduleId = popoverScheduleId;
+    const continuation = streamContextByScheduleId[scheduleId];
+    const contextAnswer = contextAnswerByScheduleId[scheduleId]?.trim() ?? "";
+    if (!scheduleId || !continuation || !contextAnswer) {
       return;
     }
 
-    await regenerateScheduleById(selectedSchedule.id, buildContinuationPayload(selectedContinuation, contextAnswer.trim()));
+    await regenerateScheduleById(scheduleId, buildContinuationPayload(continuation, contextAnswer));
   }
 
   async function toggleTask(scheduleId: string, taskId: string, isDone: boolean) {
@@ -499,20 +599,29 @@ export default function App() {
       }
       return { ...current, [doneData.schedule_id]: doneData };
     });
+    setContextAnswerByScheduleId((current) => {
+      const next = { ...current };
+      delete next[doneData.schedule_id];
+      return next;
+    });
   }
 
-  function handleStreamEvent(event: StreamEvent) {
-    if (event.event === "node") {
-      const nodeName = event.node ?? "";
-      const label = streamNodeLabel[nodeName] ?? nodeName;
-      const message = label ? `${label} 완료` : "에이전트 실행 중";
-      setStreamProgress(message);
-      setNotice({ tone: "info", message: `에이전트 진행: ${message}` });
+  function updatePopoverContextAnswer(value: string) {
+    if (!popoverScheduleId) {
       return;
     }
-    if (event.event === "done") {
-      setStreamProgress("결과 저장 중");
-      setNotice({ tone: "info", message: "에이전트 결과 저장 중" });
+    setContextAnswerByScheduleId((current) => ({
+      ...current,
+      [popoverScheduleId]: value,
+    }));
+  }
+
+  function handleStreamEventForSchedule(scheduleId: string, event: StreamEvent) {
+    if (event.event === "node" && event.node) {
+      setCompletedNodesByScheduleId((current) => ({
+        ...current,
+        [scheduleId]: [...(current[scheduleId] ?? []), event.node!],
+      }));
     }
   }
 
@@ -556,7 +665,7 @@ export default function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${isSidebarOpen ? "" : " sidebar-collapsed"}`}>
       {notice && (
         <div className={`app-toast ${notice.tone}`} role="status">
           <span>{notice.message}</span>
@@ -566,21 +675,25 @@ export default function App() {
         </div>
       )}
 
-      <aside className="schedule-sidebar" aria-label="일정 목록">
+      <aside className={`schedule-sidebar${isSidebarOpen ? "" : " collapsed"}`} aria-label="일정 목록">
         <header className="sidebar-header">
           <div>
             <p className="eyebrow">TaskPilot</p>
             <h1>일정</h1>
           </div>
-          <button className="icon-button" type="button" aria-label="새 일정" onClick={() => openNewSchedule()}>
-            +
-          </button>
+          <div className="sidebar-header-actions">
+            <button className="sidebar-add-btn" type="button" aria-label="새 일정" onClick={() => openNewSchedule()}>
+              <i className="fa-solid fa-plus" aria-hidden="true" />
+            </button>
+            <button className="sidebar-toggle" type="button" aria-label="사이드바 닫기" onClick={() => setIsSidebarOpen(false)}>
+              <i className="fa-solid fa-chevron-left" aria-hidden="true" />
+            </button>
+          </div>
         </header>
 
-        {(isInitialLoading || isCreatingNewSchedule) && (
+        {isInitialLoading && (
           <div className="inline-notice">
-            <strong>{isInitialLoading ? "불러오는 중" : "생성 중"}</strong>
-            {streamProgress && <span>{streamProgress}</span>}
+            <strong>불러오는 중</strong>
           </div>
         )}
 
@@ -596,60 +709,18 @@ export default function App() {
               disabled={loadingScheduleId === schedule.id}
               onClick={() => setSelectedScheduleId(schedule.id)}
             >
-              <span className="schedule-list-main">
-                <strong>{schedule.title}</strong>
+              <div className="sli-row">
+                <span className="sli-title">{schedule.title}</span>
+                <span className={`sli-dot sli-dot-${schedule.status}`} aria-hidden="true" />
+              </div>
+              <div className="sli-meta">
                 <span>{formatTimeRange(schedule.start_time, schedule.end_time)}</span>
-                <span>{schedule.location || "위치 없음"}</span>
-              </span>
+                {schedule.location && <span>{schedule.location}</span>}
+              </div>
+              {loadingScheduleId === schedule.id && <span className="sli-loading">생성 중…</span>}
               {schedule.status === "fallback" && (
-                <span className="fallback-reason">{getFallbackReason(schedule.fallback_reason)}</span>
+                <span className="sli-fallback">{getFallbackReason(schedule.fallback_reason)}</span>
               )}
-              <span className={`status-pill status-${schedule.status}`}>
-                {loadingScheduleId === schedule.id ? "생성 중" : statusLabel[schedule.status]}
-              </span>
-              {loadingScheduleId === schedule.id && streamProgress && <span className="schedule-progress">{streamProgress}</span>}
-              <span className="schedule-list-actions" aria-label={`${schedule.title} 작업`}>
-                <span
-                  className="list-action-button"
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`${schedule.title} 수정`}
-                  title="수정"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openDetail(schedule.id);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      openDetail(schedule.id);
-                    }
-                  }}
-                >
-                  <i className="fa-solid fa-pen-to-square" aria-hidden="true" />
-                </span>
-                <span
-                  className="list-action-button danger"
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`${schedule.title} 삭제`}
-                  title="삭제"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void deleteScheduleById(schedule.id);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      void deleteScheduleById(schedule.id);
-                    }
-                  }}
-                >
-                  <i className="fa-solid fa-trash-can" aria-hidden="true" />
-                </span>
-              </span>
             </button>
           ))}
         </div>
@@ -657,31 +728,25 @@ export default function App() {
 
       <section className="calendar-pane" aria-label="캘린더">
         <header className="workspace-topbar">
-          <div>
-            <p className="eyebrow">Calendar</p>
-            <h2>{selectedSchedule ? selectedSchedule.title : "선택된 일정 없음"}</h2>
-          </div>
-          <div className="topbar-actions">
-            {selectedSchedule && (
-              <div className="selected-meta">
-                <span>{formatDateLabel(selectedSchedule.start_time)}</span>
-                <span>{formatTimeRange(selectedSchedule.start_time, selectedSchedule.end_time)}</span>
-                {selectedSchedule.status === "fallback" && (
-                  <span className="selected-fallback-reason">{getFallbackReason(selectedSchedule.fallback_reason)}</span>
-                )}
-              </div>
-            )}
-            <div className="account-box">
-              <span>{authSession.user.email ?? "로그인됨"}</span>
-              <button className="ghost-button" type="button" onClick={() => void handleSignOut()}>
-                로그아웃
+          <div className="topbar-brand">
+            {!isSidebarOpen && (
+              <button className="sidebar-toggle" type="button" aria-label="사이드바 열기" onClick={() => setIsSidebarOpen(true)}>
+                <i className="fa-solid fa-chevron-right" aria-hidden="true" />
               </button>
-            </div>
+            )}
+            <h1>TaskPilot</h1>
+          </div>
+          <div className="account-box">
+            <span>{authSession.user.email ?? "로그인됨"}</span>
+            <button className="ghost-button" type="button" onClick={() => void handleSignOut()}>
+              로그아웃
+            </button>
           </div>
         </header>
 
-        <div className="calendar-surface">
+        <div className="calendar-surface" ref={calendarSurfaceRef}>
           <FullCalendar
+            ref={calendarRef}
             plugins={[dayGridPlugin, interactionPlugin, listPlugin, timeGridPlugin]}
             initialView="timeGridWeek"
             headerToolbar={{
@@ -707,8 +772,11 @@ export default function App() {
             eventClick={handleEventClick}
             select={handleDateSelect}
             dateClick={handleDateClick}
-            slotMinTime="07:00:00"
-            slotMaxTime="23:00:00"
+            slotMinTime="00:00:00"
+            slotMaxTime="24:00:00"
+            eventDidMount={(info) => {
+              info.el.dataset.scheduleId = info.event.id;
+            }}
           />
         </div>
       </section>
@@ -721,20 +789,6 @@ export default function App() {
           </div>
           <span>{taskGroups.reduce((sum, group) => sum + group.taskCount, 0)}개</span>
         </header>
-
-        {canAnswerQuestion && (
-          <form className="clarification-panel" onSubmit={submitContextAnswer}>
-            <strong>{selectedContinuation.question}</strong>
-            <textarea
-              value={contextAnswer}
-              placeholder="답변"
-              onChange={(event) => setContextAnswer(event.target.value)}
-            />
-            <button className="primary-button" type="submit" disabled={loadingScheduleId === selectedSchedule?.id}>
-              답변 제출
-            </button>
-          </form>
-        )}
 
         <div className="task-group-list">
           {taskGroups.length === 0 && <p className="empty-text">생성된 task 없음</p>}
@@ -790,6 +844,32 @@ export default function App() {
           ))}
         </div>
       </aside>
+
+      {popoverSchedule && popoverAnchor && (
+        <>
+          <div className="popover-backdrop" onClick={() => setPopoverScheduleId("")} aria-hidden="true" />
+          <SchedulePopover
+            schedule={popoverSchedule}
+            completedNodes={completedNodesByScheduleId[popoverScheduleId] ?? []}
+            isLoading={loadingScheduleId === popoverScheduleId}
+            anchor={popoverAnchor}
+            continuation={streamContextByScheduleId[popoverScheduleId]}
+            contextAnswer={popoverContextAnswer}
+            onContextAnswerChange={updatePopoverContextAnswer}
+            onSubmitAnswer={submitContextAnswer}
+            onToggleTask={(taskId, isDone) => void toggleTask(popoverScheduleId, taskId, isDone)}
+            onOpenDetail={() => {
+              setPopoverScheduleId("");
+              openDetail(popoverScheduleId);
+            }}
+            onDelete={() => {
+              setPopoverScheduleId("");
+              void deleteScheduleById(popoverScheduleId);
+            }}
+            onClose={() => setPopoverScheduleId("")}
+          />
+        </>
+      )}
 
       {newScheduleForm && (
         <div className="modal-backdrop" role="presentation">
@@ -876,7 +956,7 @@ function ScheduleFields({
       </label>
       <label>
         상세 내용
-        <textarea value={form.detail} required onChange={(event) => update("detail", event.target.value)} />
+        <textarea value={form.detail} required minLength={10} onChange={(event) => update("detail", event.target.value)} />
       </label>
       <label>
         위치
@@ -905,6 +985,161 @@ function ScheduleFields({
         </label>
       </div>
     </>
+  );
+}
+
+function SchedulePopover({
+  schedule,
+  completedNodes,
+  isLoading,
+  anchor,
+  continuation,
+  contextAnswer,
+  onContextAnswerChange,
+  onSubmitAnswer,
+  onToggleTask,
+  onOpenDetail,
+  onDelete,
+  onClose,
+}: {
+  schedule: CalendarSchedule;
+  completedNodes: string[];
+  isLoading: boolean;
+  anchor: { top: number; left: number; right: number } | null;
+  continuation?: StreamDoneData;
+  contextAnswer: string;
+  onContextAnswerChange: (v: string) => void;
+  onSubmitAnswer: (e: FormEvent<HTMLFormElement>) => void;
+  onToggleTask: (taskId: string, isDone: boolean) => void;
+  onOpenDetail: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const isDone = !isLoading;
+  const isAllDone = schedule.status === "ok";
+  const hasNoHistory = completedNodes.length === 0;
+
+  const lastCompletedIndex = AGENT_STEPS.reduce(
+    (acc, step, i) => (completedNodes.includes(step.key) ? i : acc),
+    -1,
+  );
+
+  const hasQuestion =
+    !isLoading &&
+    schedule.status === "needs_question" &&
+    continuation &&
+    continuation.question.trim().length > 0;
+
+  const POPOVER_W = 272;
+  const winW = typeof window !== "undefined" ? window.innerWidth : 1920;
+  const winH = typeof window !== "undefined" ? window.innerHeight : 1080;
+  const hasAnchor = anchor !== null;
+  const showRight = hasAnchor && anchor!.right + POPOVER_W + 16 < winW;
+  const left = hasAnchor
+    ? showRight
+      ? anchor!.right + 10
+      : anchor!.left - POPOVER_W - 10
+    : Math.round((winW - POPOVER_W) / 2);
+  const top = hasAnchor ? Math.max(16, Math.min(anchor!.top - 16, winH - 440)) : 120;
+
+  return (
+    <div
+      className={`schedule-popover ${!hasAnchor ? "no-anchor" : showRight ? "tail-left" : "tail-right"}`}
+      style={{ top, left }}
+      role="dialog"
+      aria-label="일정 생성 진행 상황"
+    >
+      <div className="popover-tail" aria-hidden="true" />
+      <header className="popover-header">
+        <div className="popover-header-info">
+          <span className="popover-title">{schedule.title}</span>
+          <span className="popover-meta-time">{formatTimeRange(schedule.start_time, schedule.end_time)}</span>
+          {schedule.location && <span className="popover-meta-location">{schedule.location}</span>}
+        </div>
+        <div className="popover-header-actions">
+          <button className="popover-action-button" type="button" aria-label="수정" title="수정" onClick={onOpenDetail}>
+            <i className="fa-solid fa-pen-to-square" aria-hidden="true" />
+          </button>
+          <button className="popover-action-button danger" type="button" aria-label="삭제" title="삭제" onClick={onDelete}>
+            <i className="fa-solid fa-trash-can" aria-hidden="true" />
+          </button>
+          <button className="popover-close" type="button" aria-label="닫기" onClick={onClose}>
+            <i className="fa-solid fa-xmark" aria-hidden="true" />
+          </button>
+        </div>
+      </header>
+      {isAllDone && schedule.tasks.length > 0 ? (
+        <ol className="popover-task-list" aria-label="생성된 task">
+          {schedule.tasks.map((task) => (
+            <li key={task.id} className="popover-task-item">
+              <label className="popover-task-check">
+                <input
+                  type="checkbox"
+                  checked={task.is_done}
+                  onChange={(e) => onToggleTask(task.id, e.target.checked)}
+                />
+                <span className={`popover-task-title${task.is_done ? " done" : ""}`}>{task.title}</span>
+              </label>
+              <small className="popover-task-minutes">{task.estimated_minutes}분</small>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <ol className="popover-steps" aria-label="진행 단계">
+          {AGENT_STEPS.map((step, index) => {
+            const isCompleted =
+              completedNodes.includes(step.key) || (isDone && isAllDone && hasNoHistory && !step.optional);
+            const isSkipped = step.optional && !completedNodes.includes(step.key) && isDone;
+            const isActive = isLoading && !isCompleted && !isSkipped && index === lastCompletedIndex + 1;
+            const state: "done" | "active" | "skipped" | "pending" = isCompleted
+              ? "done"
+              : isActive
+                ? "active"
+                : isSkipped
+                  ? "skipped"
+                  : "pending";
+
+            return (
+              <li key={step.key} className={`popover-step popover-step-${state}`}>
+                <span className="step-icon" aria-hidden="true">
+                  {state === "done" && <i className="fa-solid fa-check" />}
+                  {state === "active" && <i className="fa-solid fa-circle-notch fa-spin" />}
+                  {state === "skipped" && <i className="fa-solid fa-minus" />}
+                  {state === "pending" && <i className="fa-regular fa-circle" />}
+                </span>
+                <span className="step-label">{step.label}</span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {schedule.status === "fallback" && (
+        <div className="popover-fallback-block">
+          <div className="popover-fallback-label">
+            <i className="fa-solid fa-triangle-exclamation" aria-hidden="true" />
+            <span>실패 원인</span>
+          </div>
+          <p className="popover-fallback-msg">{getFallbackReason(schedule.fallback_reason)}</p>
+          <button className="popover-edit-button" type="button" onClick={onOpenDetail}>
+            <i className="fa-solid fa-pen-to-square" aria-hidden="true" />
+            수정 후 재시도
+          </button>
+        </div>
+      )}
+      {hasQuestion && continuation && (
+        <form className="popover-question-form" onSubmit={onSubmitAnswer}>
+          <p className="popover-question-text">{continuation.question}</p>
+          <textarea
+            value={contextAnswer}
+            placeholder="답변을 입력하세요"
+            onChange={(e) => onContextAnswerChange(e.target.value)}
+          />
+          <button className="primary-button" type="submit" disabled={isLoading}>
+            답변 제출
+          </button>
+        </form>
+      )}
+    </div>
   );
 }
 
