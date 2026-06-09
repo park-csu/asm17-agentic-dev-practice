@@ -187,7 +187,7 @@ export default function App() {
   const [popoverAnchor, setPopoverAnchor] = useState<PopoverAnchor | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [streamContextByScheduleId, setStreamContextByScheduleId] = useState<Record<string, StreamDoneData>>({});
-  const [contextAnswer, setContextAnswer] = useState("");
+  const [contextAnswerByScheduleId, setContextAnswerByScheduleId] = useState<Record<string, string>>({});
   const [authSession, setAuthSession] = useState<Session | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isSigningIn, setIsSigningIn] = useState(false);
@@ -196,11 +196,10 @@ export default function App() {
 
   const accessToken = authSession?.access_token ?? "";
   const isCreatingNewSchedule = loadingScheduleId.startsWith("temp-schedule-");
-  const selectedSchedule = schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null;
   const calendarEvents = useMemo(() => toCalendarEvents(schedules, selectedScheduleId), [schedules, selectedScheduleId]);
   const taskGroups = useMemo(() => buildTaskGroups(schedules), [schedules]);
-  const selectedContinuation = selectedSchedule ? streamContextByScheduleId[selectedSchedule.id] : undefined;
   const popoverSchedule = schedules.find((s) => s.id === popoverScheduleId) ?? null;
+  const popoverContextAnswer = popoverScheduleId ? contextAnswerByScheduleId[popoverScheduleId] ?? "" : "";
 
   useEffect(() => {
     if (!supabase) {
@@ -231,6 +230,7 @@ export default function App() {
         setSchedules([]);
         setSelectedScheduleId("");
         setStreamContextByScheduleId({});
+        setContextAnswerByScheduleId({});
       }
     });
 
@@ -487,6 +487,11 @@ export default function App() {
         delete next[scheduleId];
         return next;
       });
+      setContextAnswerByScheduleId((current) => {
+        const next = { ...current };
+        delete next[scheduleId];
+        return next;
+      });
       if (selectedScheduleId === scheduleId) {
         setSelectedScheduleId("");
       }
@@ -527,7 +532,6 @@ export default function App() {
       await refreshSchedule(scheduleId);
       rememberContinuation(doneData);
       setSelectedScheduleId(scheduleId);
-      setContextAnswer("");
     } catch (error) {
       setNotice({ tone: "danger", message: getErrorMessage(error, "task 재생성에 실패했습니다.") });
     } finally {
@@ -537,11 +541,14 @@ export default function App() {
 
   async function submitContextAnswer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedSchedule || !selectedContinuation || !contextAnswer.trim()) {
+    const scheduleId = popoverScheduleId;
+    const continuation = streamContextByScheduleId[scheduleId];
+    const contextAnswer = contextAnswerByScheduleId[scheduleId]?.trim() ?? "";
+    if (!scheduleId || !continuation || !contextAnswer) {
       return;
     }
 
-    await regenerateScheduleById(selectedSchedule.id, buildContinuationPayload(selectedContinuation, contextAnswer.trim()));
+    await regenerateScheduleById(scheduleId, buildContinuationPayload(continuation, contextAnswer));
   }
 
   async function toggleTask(scheduleId: string, taskId: string, isDone: boolean) {
@@ -592,6 +599,21 @@ export default function App() {
       }
       return { ...current, [doneData.schedule_id]: doneData };
     });
+    setContextAnswerByScheduleId((current) => {
+      const next = { ...current };
+      delete next[doneData.schedule_id];
+      return next;
+    });
+  }
+
+  function updatePopoverContextAnswer(value: string) {
+    if (!popoverScheduleId) {
+      return;
+    }
+    setContextAnswerByScheduleId((current) => ({
+      ...current,
+      [popoverScheduleId]: value,
+    }));
   }
 
   function handleStreamEventForSchedule(scheduleId: string, event: StreamEvent) {
@@ -832,8 +854,8 @@ export default function App() {
             isLoading={loadingScheduleId === popoverScheduleId}
             anchor={popoverAnchor}
             continuation={streamContextByScheduleId[popoverScheduleId]}
-            contextAnswer={contextAnswer}
-            onContextAnswerChange={setContextAnswer}
+            contextAnswer={popoverContextAnswer}
+            onContextAnswerChange={updatePopoverContextAnswer}
             onSubmitAnswer={submitContextAnswer}
             onToggleTask={(taskId, isDone) => void toggleTask(popoverScheduleId, taskId, isDone)}
             onOpenDetail={() => {
