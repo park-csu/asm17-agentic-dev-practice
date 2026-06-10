@@ -11,7 +11,7 @@ Accepted
 - 추가 질문은 v1에서 interrupt/checkpointer 대신 `status="needs_question"` 응답으로 처리한다.
 - 일정 시간 입력은 단일 `time` 또는 마감일이 아니라 `start_time`/`end_time` 범위로 받는다.
 - 서버 상태 저장이 없는 v1에서는 `classification_retry`, `pre_validation_retry`, `plan_retry`, `detail_with_context`, `question`, `question_source`, `context_answer`를 요청/응답으로 전달해 LangGraph 상태를 이어간다.
-- 캘린더/DB 연동 전에는 `existing_schedules`를 요청으로 받아 기존 일정 충돌 검증을 실험한다.
+- 캘린더/DB 연동 전에는 `existing_schedules`를 요청으로 받아 기존 일정 충돌과 위치 이동 가능성 검증을 실험한다.
 - DB 저장은 에이전트 노드가 아니라 API 또는 서비스 레이어에서 처리한다.
 - 스트리밍 API는 `stream_mode=["updates", "values"]`로 그래프를 한 번만 실행한다. `updates`는 노드 진행 이벤트에, 마지막 `values`는 최종 응답에 사용한다.
 - 노드의 실제 LLM 성능 평가는 그래프 전체 테스트와 분리하고, 평가 대상 노드를 직접 호출한다.
@@ -29,7 +29,7 @@ Accepted
 - 재시도 분기를 LangGraph에서 표현할 수 있다.
 - v1에서는 대화 상태를 API 요청/응답으로 이어받아야 한다.
 - 정식 API/DB 연동 단계에서는 retry count와 누적 컨텍스트를 클라이언트 입력이 아니라 run/session 저장소에서 관리하도록 재설계해야 한다.
-- 정식 캘린더/DB 연동 단계에서는 기존 일정을 클라이언트 입력이 아니라 서버 조회 결과로 구성해야 한다.
+- 정식 캘린더/DB 연동 단계에서는 기존 일정을 클라이언트 입력이 아니라 서버 조회 결과로 구성하며, 시간 충돌뿐 아니라 요청 전후 위치 이동 검증에 필요한 일정도 포함해야 한다.
 - 장기 대화 상태가 필요해지면 LangGraph checkpointer 도입을 다시 검토한다.
 - 스트리밍 중계 결과와 최종 응답은 동일한 그래프 실행에서 생성되며, LLM 호출 비용과 지연이 중복되지 않는다.
 - 합성·익명화 평가 케이스와 평가 코드는 저장소에서 공유하고, 실행 결과 파일은 로컬 산출물로 관리한다.

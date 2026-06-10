@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 import pytest
@@ -5,7 +6,7 @@ from httpx import AsyncClient
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from backend.api.schedules import ensure_user_exists, get_overlapping_schedules
+from backend.api.schedules import ensure_user_exists, get_validation_context_schedules
 from backend.db.models import Task, User
 from tests.backend.factories import ScheduleFactory, TaskFactory
 
@@ -176,11 +177,11 @@ async def test_update_task_wrong_schedule(client: AsyncClient, db_session: Async
 
 # ── existing_schedules 주입 ─────────────────────────────────────
 
-async def test_get_overlapping_schedules_can_exclude_current_schedule(db_session: AsyncSession):
+async def test_get_validation_context_schedules_can_exclude_current_schedule(db_session: AsyncSession):
     current = await create_schedule(db_session, title="재생성 대상 일정")
     other = await create_schedule(db_session, title="겹치는 다른 일정")
 
-    existing = await get_overlapping_schedules(
+    existing = await get_validation_context_schedules(
         db_session,
         current.start_time.isoformat(),
         current.end_time.isoformat(),
@@ -192,13 +193,49 @@ async def test_get_overlapping_schedules_can_exclude_current_schedule(db_session
     assert titles == {other.title}
 
 
-async def test_get_overlapping_schedules_filters_by_user_id(db_session: AsyncSession):
+async def test_get_validation_context_schedules_includes_nearby_non_overlapping_schedule(db_session: AsyncSession):
+    await create_schedule(
+        db_session,
+        title="서울 팀 회의",
+        location="서울특별시",
+        start_time=datetime(2026, 6, 15, 9, 0),
+        end_time=datetime(2026, 6, 15, 10, 0),
+    )
+
+    existing = await get_validation_context_schedules(
+        db_session,
+        "2026-06-15T11:00:00",
+        "2026-06-15T12:00:00",
+    )
+
+    assert [schedule["title"] for schedule in existing] == ["서울 팀 회의"]
+    assert existing[0]["location"] == "서울특별시"
+
+
+async def test_get_validation_context_schedules_excludes_far_schedule(db_session: AsyncSession):
+    await create_schedule(
+        db_session,
+        title="전날 저녁 회의",
+        start_time=datetime(2026, 6, 14, 18, 0),
+        end_time=datetime(2026, 6, 14, 19, 0),
+    )
+
+    existing = await get_validation_context_schedules(
+        db_session,
+        "2026-06-15T11:00:00",
+        "2026-06-15T12:00:00",
+    )
+
+    assert existing == []
+
+
+async def test_get_validation_context_schedules_filters_by_user_id(db_session: AsyncSession):
     user_id = UUID("00000000-0000-0000-0000-000000000001")
     other_user_id = UUID("00000000-0000-0000-0000-000000000002")
     await create_schedule(db_session, title="내 일정", user_id=user_id)
     await create_schedule(db_session, title="다른 사용자 일정", user_id=other_user_id)
 
-    existing = await get_overlapping_schedules(
+    existing = await get_validation_context_schedules(
         db_session,
         "2026-06-10T10:30:00",
         "2026-06-10T11:30:00",

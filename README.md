@@ -118,7 +118,7 @@ curl -X POST http://localhost:8001/api/v1/schedules/tasks/sync \
 
 `is_decomposable`은 일정이 여러 하위 task로 분해할 가치가 있는지 나타냅니다. `false`이면 일정 유효성 검증은 수행하지만, 유효한 경우 `tasks=[]`인 정상 응답을 반환합니다.
 
-`existing_schedules`는 캘린더/DB 연동 전 충돌 검증을 실험하기 위한 임시 입력 필드입니다. 정식 API에서는 서버가 Google Calendar 또는 PostgreSQL에서 기존 일정을 조회하는 방식으로 변경할 예정입니다.
+`existing_schedules`는 캘린더/DB 연동 전 충돌 검증을 실험하기 위한 임시 입력 필드입니다. 정식 API에서는 서버가 Google Calendar 또는 PostgreSQL에서 시간 충돌과 위치 이동 검증에 필요한 기존 일정을 조회하는 방식으로 변경할 예정입니다.
 
 `location`과 `existing_schedules` 안의 `location`은 일정 사이 이동 가능성을 검증할 때 사용합니다. 위치가 없거나 이동 가능 여부가 불명확한 경우에는 위치만으로 일정을 거절하지 않습니다.
 

@@ -25,7 +25,7 @@ Accepted
 
 **existing_schedules 주입 방식**
 - 기존 프로토타입에서 클라이언트가 `existing_schedules`를 직접 넘기던 방식을 제거한다.
-- 서버가 DB에서 `start_time`/`end_time` 겹치는 `status=ok` 일정만 조회해 에이전트에 주입한다.
+- 서버가 DB에서 `start_time`/`end_time` 기준으로 충돌하거나 요청 전후 위치 이동 검증에 필요한 `status=ok` 일정을 조회해 에이전트에 주입한다.
 
 **SSE 저장 타이밍**
 - `done` 이벤트 전에 DB 저장을 완료한다.
@@ -47,7 +47,7 @@ Accepted
 ## Consequences
 - 에이전트와 API 레이어의 책임이 명확히 분리된다.
 - `backend`에서 `app/schedule_agent`를 임포트하므로 Docker 이미지에 두 패키지 모두 포함해야 한다.
-- `existing_schedules` 클라이언트 입력이 제거되어 API 계약이 단순해진다.
+- `existing_schedules` 클라이언트 입력이 제거되어 API 계약이 단순해지고, 시간 충돌과 위치 이동 가능성을 같은 검증 컨텍스트에서 판단할 수 있다.
 - Supabase Session pooler 사용 시 `asyncpg`는 `postgresql+asyncpg://` 연결 문자열을 사용한다.
 - JWKS 방식으로 JWT 검증하므로 Railway 환경변수에 `SUPABASE_URL`만 추가하면 된다.
 - 모든 일정 엔드포인트는 `user_id` 기반으로 데이터를 격리하므로 다른 사용자의 데이터에 접근할 수 없다.

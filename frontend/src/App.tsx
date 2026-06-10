@@ -19,6 +19,7 @@ import {
 import type { AgentNodeName, StreamDoneData, StreamEvent } from "./api/types";
 import { isSupabaseConfigured, signInWithGoogle, signOut, supabase } from "./auth/supabase";
 import { apiScheduleToCalendarSchedule, apiSchedulesToCalendarSchedules } from "./calendar/apiAdapter";
+import { getCompactFallbackReason, getFallbackReason } from "./calendar/fallbackReason";
 import { buildTaskGroups, findClosestScheduleId, formatDateLabel, formatTimeRange } from "./calendar/model";
 import type { CalendarSchedule, ScheduleStatus } from "./calendar/types";
 
@@ -99,12 +100,13 @@ function renderEventContent(info: EventContentArg) {
   const status = info.event.extendedProps.status as ScheduleStatus;
   const fallbackReason = String(info.event.extendedProps.fallbackReason ?? "");
   const title = status === "fallback" ? getFallbackReason(fallbackReason) : undefined;
+  const compactReason = getCompactFallbackReason(fallbackReason);
   return (
     <div className="calendar-event-content" title={title}>
       <span className={`calendar-event-status status-${status}`} aria-hidden="true" />
       <span className="calendar-event-time">{info.timeText}</span>
       <span className="calendar-event-title">{info.event.title}</span>
-      {status === "fallback" && <span className="calendar-event-reason">{getFallbackReason(fallbackReason)}</span>}
+      {status === "fallback" && <span className="calendar-event-reason">{compactReason}</span>}
     </div>
   );
 }
@@ -152,10 +154,6 @@ function buildContinuationPayload(doneData: StreamDoneData, contextAnswer: strin
     plan_retry: doneData.plan_retry,
     detail_with_context: doneData.detail_with_context,
   };
-}
-
-function getFallbackReason(reason: string): string {
-  return reason.trim() || "일정 상세 내용을 더 구체적으로 작성 후 재시도하세요.";
 }
 
 function createTemporaryScheduleId(): string {
@@ -719,7 +717,9 @@ export default function App() {
               </div>
               {loadingScheduleId === schedule.id && <span className="sli-loading">생성 중…</span>}
               {schedule.status === "fallback" && (
-                <span className="sli-fallback">{getFallbackReason(schedule.fallback_reason)}</span>
+                <span className="sli-fallback" title={getFallbackReason(schedule.fallback_reason)}>
+                  {getCompactFallbackReason(schedule.fallback_reason)}
+                </span>
               )}
             </button>
           ))}
