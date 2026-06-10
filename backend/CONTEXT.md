@@ -29,7 +29,7 @@
 
 ## 주요 설계 결정
 
-- `existing_schedules`는 클라이언트가 넘기지 않고, 서버가 DB에서 시간 겹치는 일정을 직접 조회해 에이전트에 주입한다.
+- `existing_schedules`는 클라이언트가 넘기지 않고, 서버가 DB에서 시간 충돌 또는 위치 이동 검증에 필요한 주변 일정을 직접 조회해 에이전트에 주입한다.
 - SSE `done` 이벤트 전에 DB 저장을 완료하여 `schedule_id`를 즉시 반환한다.
 - 에이전트 플로우는 `app/schedule_agent`가 소유하며, `backend`는 호출과 저장만 담당한다.
 - 인증은 Supabase Auth + Google OAuth. 백엔드는 JWKS로 JWT를 검증하고 `user_id`로 데이터를 격리한다.

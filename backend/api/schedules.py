@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -20,6 +20,7 @@ router = APIRouter(tags=["schedules"])
 graph = create_graph()
 
 STREAM_NODE_NAMES = {"pre_validate", "classification", "ask_context", "plan", "post_validate", "output", "fallback"}
+VALIDATION_CONTEXT_LOOKAROUND_HOURS = 12
 
 
 # ── 요청/응답 모델 ──────────────────────────────────────────────
@@ -118,23 +119,25 @@ def parse_datetime(value: str) -> Optional[datetime]:
             return None
 
 
-async def get_overlapping_schedules(
+async def get_validation_context_schedules(
     session: AsyncSession,
     start_time: str,
     end_time: str,
     exclude_schedule_id: UUID | None = None,
     user_id: UUID | None = None,
 ) -> list[dict]:
-    """저장된 ok 상태 일정 중 시간이 겹치는 것만 반환한다."""
+    """시간 충돌과 위치 이동 검증에 필요한 주변 ok 상태 일정을 반환한다."""
     start_at = parse_datetime(start_time)
     end_at = parse_datetime(end_time)
     if not start_at or not end_at:
         return []
+    window_start = start_at - timedelta(hours=VALIDATION_CONTEXT_LOOKAROUND_HOURS)
+    window_end = end_at + timedelta(hours=VALIDATION_CONTEXT_LOOKAROUND_HOURS)
     stmt = select(Schedule).where(
         Schedule.status == "ok",
-        Schedule.start_time < end_at,
-        Schedule.end_time > start_at,
-    )
+        Schedule.start_time < window_end,
+        Schedule.end_time > window_start,
+    ).order_by(Schedule.start_time)
     if user_id is not None:
         stmt = stmt.where(Schedule.user_id == user_id)
     if exclude_schedule_id is not None:
@@ -149,6 +152,23 @@ async def get_overlapping_schedules(
         }
         for s in results.all()
     ]
+
+
+async def get_overlapping_schedules(
+    session: AsyncSession,
+    start_time: str,
+    end_time: str,
+    exclude_schedule_id: UUID | None = None,
+    user_id: UUID | None = None,
+) -> list[dict]:
+    """이전 이름과의 호환을 위해 검증용 관련 일정을 반환한다."""
+    return await get_validation_context_schedules(
+        session,
+        start_time,
+        end_time,
+        exclude_schedule_id=exclude_schedule_id,
+        user_id=user_id,
+    )
 
 
 async def ensure_user_exists(session: AsyncSession, user_id: UUID) -> None:
@@ -327,7 +347,7 @@ async def create_schedule_stream(
 ):
     async with AsyncSessionLocal() as session:
         await ensure_user_exists(session, user_id)
-        existing = await get_overlapping_schedules(session, req.start_time, req.end_time, user_id=user_id)
+        existing = await get_validation_context_schedules(session, req.start_time, req.end_time, user_id=user_id)
 
     initial_state = build_agent_state(req, existing)
 
@@ -548,7 +568,7 @@ async def regenerate_schedule_stream(
     if not schedule or schedule.user_id != user_id:
         raise HTTPException(status_code=404, detail="일정을 찾을 수 없습니다.")
 
-    existing = await get_overlapping_schedules(
+    existing = await get_validation_context_schedules(
         session,
         schedule.start_time.isoformat() if schedule.start_time else "",
         schedule.end_time.isoformat() if schedule.end_time else "",
